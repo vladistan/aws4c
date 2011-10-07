@@ -1,0 +1,83 @@
+AWS4C - A C lbrary to interface with Amazon Web Services
+Copyright (c) 2009  Vlad Korolev   vlad@v-lad.org
+
+with Contributions from Henry Nestler <Henry at BigFoot.de>
+
+
+Licensing
+----------
+
+See COPYING  for license information.
+
+
+Prerequisites
+--------------
+
+   This library needs following pre-requisites
+
+   * CURL (http://curl.haxx.se/)
+
+   * OpenSSL (http://www.openssl.org/)
+
+
+Authentication with AWS
+----------------------
+
+AWS4C uses ~/.awsAuth file for retrieving AWS credentials the .awsAuth
+has the format similar to UNIX passwd file.  Each line of the file
+should contain the following items,  user ID,  AWS Key ID, and AWS Key.
+The items should be separated by colon ':'.   The first item of each line
+the user ID parameter is a record identifier.  The record identifeir is
+used by aws_read_config function to the AWS key  id and the value to be used 
+by the library.  The sample code supplied with this library uses ID 'sample'
+Make sure to configure this ID in your .awsAuth file before running the 
+example programs.
+
+Note the .awsAuth file should be owned by the user who is executing the 
+program and should have permissons such that it is only readable by the
+owner.
+ 
+Here is an example of the file:
+
+id:1XASDSDSDSAMPLE:IK234jJk3454543SAMPLE
+user2:1X35D84SD9AMPLE:IK234jJk3454543SAMPLE
+sample:1XA39S3xwSAMPLE:IK234jJk3454543SAMPLE
+
+
+Installation
+------------
+
+    Make sure that pre-requisites installed.  Then run 'make' command to
+    build examples.
+
+    Edit the ~/.awsAuth file.  Put the your AWS key for the sample ID
+
+    Run the following examples to test the library
+
+	sqs_example   --  shows SQS interface
+	s3_put	      --  puts a file into S3
+	s3_get	      --  retrieves the file from S3
+
+
+Integration
+-----------
+
+    To integrate the library with your project copy aws4c.c and aws4c.h
+    into your project directory and edit your makefile accordingly
+
+    Refer to Makefile supplied with the library for guidance
+
+
+
+Additional Info
+---------------
+
+API manual and additional information is available at 
+ 
+http://code.google.com/p/aws4c/wiki/Main
+
+and
+
+http://v-lad.org/software/aws4c/
+
+

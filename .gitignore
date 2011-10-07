@@ -1,0 +1,6 @@
+*.dSYM
+s3_delete
+s3_get
+s3_put
+sqs_example
+*.tmp
