@@ -18,10 +18,10 @@ dist:
 	tar -czf aws4c.${VERSION}.tgz ${DNAME}
 
 clean:
-	-rm *.exe
-	-rm s3_get s3_put s3_delete sqs_example aws4c.o
-	-rm *.tgz
-	-rm -rf ${DNAME}
+	$(RM) *.exe
+	$(RM) s3_get s3_put s3_delete sqs_example aws4c.o
+	$(RM) *.tgz
+	$(RM) -r ${DNAME}
 	
 
 LDLIBS=`curl-config --libs` -lcrypto
