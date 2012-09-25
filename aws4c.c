@@ -446,6 +446,19 @@ static char * SQSSign ( char * str )
 /// Initialize  the library 
 void aws_init () { curl_global_init (CURL_GLOBAL_ALL); }
 
+/// De-initialize the library 
+/// Not thread safe. Call only before last use of the library
+void aws_deinit () { 
+	if ( ID != NULL ) free ( ID );
+	if ( awsKey != NULL ) free ( awsKey );
+	if ( awsKeyID != NULL ) free ( awsKeyID );
+	if ( S3Host != NULL ) free ( S3Host );
+	if ( Bucket != NULL ) free ( Bucket );
+	if ( MimeType != NULL ) free ( MimeType );
+	if ( AccessControl != NULL ) free ( AccessControl );
+	curl_global_cleanup();
+}
+
 /// Set debuging output
 /// \param d  when non-zero causes debugging output to be printed
 void aws_set_debug (int d)
@@ -1288,12 +1301,12 @@ void   aws_iobuf_free ( IOBuf * bf )
   while ( N->next != NULL )
     {
       IOBufNode * NN = N->next;
-      if ( n->buf != NULL) free ( N->buf );
+      if ( N->buf != NULL) free ( N->buf );
       free(N);
       N = NN;
     }
   if ( N != NULL ) {
-  	if ( n->buf != NULL) free ( N->buf );
+  	if ( N->buf != NULL) free ( N->buf );
   	free( N );
   }
 }

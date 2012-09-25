@@ -41,6 +41,7 @@ typedef struct IOBuf
 
 
 void aws_init ();
+void aws_deinit ();
 void aws_set_id ( char * const str );    
 void aws_set_key ( char * const str );
 void aws_set_keyid ( char * const str );
