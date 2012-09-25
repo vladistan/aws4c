@@ -19,7 +19,7 @@ dist:
 
 clean:
 	-rm *.exe
-	-rm s3_get s3_put sqs_example
+	-rm s3_get s3_put s3_delete sqs_example aws4c.o
 	-rm *.tgz
 	-rm -rf ${DNAME}
 	
