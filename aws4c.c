@@ -1288,10 +1288,14 @@ void   aws_iobuf_free ( IOBuf * bf )
   while ( N->next != NULL )
     {
       IOBufNode * NN = N->next;
+      if ( n->buf != NULL) free ( N->buf );
       free(N);
       N = NN;
     }
-  if ( N != NULL ) free ( N );
+  if ( N != NULL ) {
+  	if ( n->buf != NULL) free ( N->buf );
+  	free( N );
+  }
 }
 
 /*!
