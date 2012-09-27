@@ -71,6 +71,6 @@ int sqs_delete_message ( IOBuf * bf, char * const url, char * receipt );
 
 IOBuf * aws_iobuf_new ();
 void   aws_iobuf_append ( IOBuf *B, char * d, int len );
-int    aws_iobuf_getline   ( IOBuf * B, char * Line, int size );
+int    aws_iobuf_getdata   ( IOBuf * B, char * Line, size_t size );
 void   aws_iobuf_free ( IOBuf * bf );
 

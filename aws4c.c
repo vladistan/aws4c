@@ -335,14 +335,14 @@ static char * GetStringToSign ( char * resource,  int resSize,
   /// \todo Change the way RRS is handled.  Need to pass it in
   
   * date = __aws_get_httpdate();
-
+  
   memset ( resource,0,resSize);
   if ( bucket != NULL )
     snprintf ( resource, resSize,"%s/%s", bucket, file );
   else
     snprintf ( resource, resSize,"%s", file );
 
-  if (AccessControl)
+  if (AccessControl )
     snprintf( acl, sizeof(acl), "x-amz-acl:%s\n", AccessControl);
   else
     acl[0] = 0;
@@ -352,15 +352,30 @@ static char * GetStringToSign ( char * resource,  int resSize,
   else
     rrs[0] = 0;
 
-
-  snprintf ( reqToSign, sizeof(reqToSign),"%s\n\n%s\n%s\n%s%s/%s",
-	     method,
-	     MimeType ? MimeType : "",
-	     *date,
-	     acl,
-	     rrs,
-	     resource );
-
+  if( strcmp(method, "DELETE") == 0 ) {
+    snprintf ( reqToSign, sizeof(reqToSign),"%s\n\n%s\n%s\n/%s",
+               method,
+               MimeType ? MimeType : "",
+               *date,
+               resource );
+  }
+  else if( strcmp(method, "PUT") == 0 ) {
+    snprintf ( reqToSign, sizeof(reqToSign),"%s\n\n%s\n%s\n%s%s/%s",
+               method,
+               MimeType ? MimeType : "",
+               *date,
+               acl,
+               rrs,
+               resource );
+  }
+  else if( strcmp(method, "GET") == 0 ) {
+    snprintf ( reqToSign, sizeof(reqToSign),"%s\n\n%s\n%s\n/%s",
+               method,
+               MimeType ? MimeType : "",
+               *date,
+               resource );
+  }
+  
   // EU: If bucket is in virtual host name, remove bucket from path
   if (bucket && strncmp(S3Host, bucket, strlen(bucket)) == 0)
     snprintf ( resource, resSize,"%s", file );
@@ -661,7 +676,8 @@ static int s3_do_put ( IOBuf *b, char * const signature,
     slist = curl_slist_append(slist, Buf );  }
 
 
-
+  snprintf ( Buf, sizeof(Buf), "Accept:" );
+  slist = curl_slist_append(slist, Buf );
   snprintf ( Buf, sizeof(Buf), "Date: %s", date );
   slist = curl_slist_append(slist, Buf );
   snprintf ( Buf, sizeof(Buf), "Authorization: AWS %s:%s", awsKeyID, signature );
@@ -701,9 +717,9 @@ static int s3_do_get ( IOBuf *b, char * const signature,
 
   CURL* ch =  curl_easy_init( );
   struct curl_slist *slist=NULL;
-
-  slist = curl_slist_append(slist, "If-Modified-Since: Tue, 26 May 2009 18:58:55 GMT" );
-  slist = curl_slist_append(slist, "ETag: \"6ea58533db38eca2c2cc204b7550aab6\"");
+  
+  snprintf ( Buf, sizeof(Buf), "Accept:" );
+  slist = curl_slist_append(slist, Buf );
 
   snprintf ( Buf, sizeof(Buf), "Date: %s", date );
   slist = curl_slist_append(slist, Buf );
@@ -739,7 +755,8 @@ static int s3_do_delete ( IOBuf *b, char * const signature,
   CURL* ch =  curl_easy_init( );
   struct curl_slist *slist=NULL;
 
-
+  snprintf ( Buf, sizeof(Buf), "Accept:" );
+  slist = curl_slist_append(slist, Buf );
   snprintf ( Buf, sizeof(Buf), "Date: %s", date );
   slist = curl_slist_append(slist, Buf );
   snprintf ( Buf, sizeof(Buf), "Authorization: AWS %s:%s", awsKeyID, signature );
@@ -891,7 +908,7 @@ int sqs_list_queues ( IOBuf *b, char * const prefix )
       while(-1)
 	{
 	  char Ln[1024];
-	  aws_iobuf_getline ( nb, Ln, sizeof(Ln));
+	  aws_iobuf_getdata ( nb, Ln, sizeof(Ln));
 	  if ( Ln[0] == 0 ) break;
 	  char *q = strstr ( Ln, "<QueueUrl>" );
 	  if ( q != 0 )
@@ -960,7 +977,7 @@ int sqs_get_queueattributes ( IOBuf *b, char * url, int *timeOut, int *nMesg )
   while(-1) 
     {
       char Ln[1024];
-      aws_iobuf_getline ( b, Ln, sizeof(Ln));
+      aws_iobuf_getdata ( b, Ln, sizeof(Ln));
       if ( Ln[0] == 0 ) break;
       
       char *q;
@@ -1115,7 +1132,7 @@ int sqs_get_message ( IOBuf * b, char * const url, char * id  )
       while(-1) 
 	{
 	  char Ln[1024];
-	  aws_iobuf_getline ( bf, Ln, sizeof(Ln));
+	  aws_iobuf_getdata ( bf, Ln, sizeof(Ln));
 	  if ( Ln[0] == 0 ) break;
 
 	  __debug ( "%s|%s|", inBody ? ">>": "", Ln );
