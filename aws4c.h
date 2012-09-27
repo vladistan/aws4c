@@ -18,7 +18,9 @@
 /// IOBuf Node
 typedef struct _IOBufNode
 {
+  size_t nLen;
   char * buf;
+  char * cur;
   struct _IOBufNode * next;
 } IOBufNode;
 

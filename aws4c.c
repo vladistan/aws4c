@@ -182,9 +182,9 @@ static size_t writedummyfunc ( void * ptr, size_t size, size_t nmemb, void * str
 /// \return number of bytes written
 static size_t readfunc ( void * ptr, size_t size, size_t nmemb, void * stream )
 {
-  char * Ln = ptr;
-  int sz = aws_iobuf_getline ( stream, ptr, size*nmemb);
-  __debug ( "Sent[%3d] %s", sz, Ln );
+  //char * Ln = ptr;
+  int sz = aws_iobuf_getdata ( stream, ptr, size*nmemb);
+  __debug ( "Sent[%3d] %s", sz, ptr );
   return sz;
 }
 
@@ -1233,6 +1233,8 @@ void   aws_iobuf_append ( IOBuf *B, char * d, int len )
   IOBufNode * N = malloc(sizeof(IOBufNode));
   N->next = NULL;
   N->buf  = malloc(len+1);
+  N->cur = N->buf;
+  N->nLen = len;
   memcpy(N->buf,d,len);
   N->buf[len] = 0;
   B->len += len;
@@ -1252,36 +1254,30 @@ void   aws_iobuf_append ( IOBuf *B, char * d, int len )
     }
 }
 
-/// Read the next line from the buffer
+/// Read the next number of bytes
 ///  \param B I/O buffer
-///  \param Line  character array to store the read line in
-///  \param size  size of the character array Line
-///  \return  number of characters read or 0 
-int    aws_iobuf_getline   ( IOBuf * B, char * Line, int size )
-{
-  int ln = 0;
-  memset ( Line, 0, size );
-
-  if ( B->current == NULL ) return 0;
-
-  while ( size - ln > 1 )
-    {
-      if ( *B->pos == '\n' ) { B->pos++; Line[ln] = '\n'; ln++; break; }
-      if ( *B->pos == 0 ) 
-      {
-	B->current = B->current->next;
-	if ( B->current == NULL ) break;
-	B->pos = B->current->buf;
-	continue;
-      }
-      Line[ln] = * B->pos;
-      ln++;
-      
-      B->pos++;
-      // At the end of the block switch again
+///  \param buffer  buffer to store the data in
+///  \param size  size of the buffer to store data
+///  \return  number of bytes read or 0 
+int aws_iobuf_getdata(IOBuf *B, char *buffer, size_t size) {    
+  size_t nRead = 0;
+  size_t nLeft = size;
+  IOBufNode *node = B->current;
+  while (node && nLeft) {
+    if (node->nLen) {
+      size_t nCopy = node->nLen >= nLeft ? nLeft : node->nLen;
+      memcpy(buffer + nRead, node->cur, nCopy);
+      nRead += nCopy;
+      node->cur += nCopy;
+      node->nLen -= nCopy;
+      nLeft -= nCopy;
     }
-  B->len -= ln;
-  return ln;
+    
+    if (nLeft) {
+      node = node->next;
+    }
+  }
+  return nRead;
 }
 
 /// Release IO Buffer
