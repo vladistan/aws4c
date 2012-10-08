@@ -245,6 +245,6 @@ global_free() {
   if( filename != NULL )     free(filename);
   if( bucketname != NULL )   free(bucketname);
   if( S3_host != NULL )      free(S3_host);
- // aws_deinit();
+  aws_deinit();
   return;
 }
