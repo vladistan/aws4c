@@ -8,6 +8,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "aws4c.h"
+#include "md5util.h"
 
 #define BUF_SIZE 128
 #define LINE_MAX 4096
@@ -53,6 +54,7 @@ int   put_file( IOBuf * aws_buf, char *name ) {
       }
       aws_iobuf_append ( aws_buf, readbuf, n);
     }
+    fclose(fp);
   }
   
   int rv = s3_put(aws_buf, name);  
@@ -211,12 +213,28 @@ main (int argc, char *argv[]) {
   operation = strdup(argv[1]);
   filename  = strdup(argv[2]);
   
+  // PUT file
   if( strcmp(operation, "PUT") == 0 ) {
+    int rc;
+    char s3replyMD5[33];
+    
     rv = put_file( aws_buf, filename );
+    if( aws_buf->eTag != NULL && strlen(aws_buf->eTag) > 2 ) {
+      memset(s3replyMD5, 0, 33);
+      memcpy(s3replyMD5, aws_buf->eTag + 1, 32);
+      rc = verifyMD5(filename, s3replyMD5);
+    }
+    if(rc != 0) {
+      return rc;
+    }
   }
+  
+  // GET file
   else if( strcmp(operation, "GET") == 0 ) {
     rv = get_file( aws_buf, filename );
   }
+  
+  // DELETE FILE
   else if( strcmp(operation, "DELETE") == 0 ) {
     rv = delete_file( aws_buf, filename );
   }
