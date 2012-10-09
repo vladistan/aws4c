@@ -106,7 +106,9 @@ int   delete_file( IOBuf * aws_buf, char *name ) {
 int
 main (int argc, char *argv[]) {
   aws_init();
-  aws_set_debug(atoi(argv[3]));
+  if(argv[3] != NULL) {
+    aws_set_debug(atoi(argv[3]));
+  }
   IOBuf * aws_buf = aws_iobuf_new();
   
   // Read credential file
@@ -204,7 +206,7 @@ main (int argc, char *argv[]) {
   s3_set_acl(S3_acl);
   
   // Check for valid arguments
-  if ( argc != 4 ) {
+  if ( argc != 3 && argc != 4 ) {
     fprintf(stderr, "Usage: s3util <operation> <filename>\n");
     fprintf(stderr, "Operation can be one of {PUT, GET, DELETE}\n");
     exit(1);
