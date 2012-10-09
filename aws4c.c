@@ -337,10 +337,8 @@ static char * GetStringToSign ( char * resource,  int resSize,
   * date = __aws_get_httpdate();
   
   memset ( resource,0,resSize);
-  if ( bucket != NULL )
-    snprintf ( resource, resSize,"%s/%s", bucket, file );
-  else
-    snprintf ( resource, resSize,"%s", file );
+
+  snprintf ( resource, resSize,"%s", file );
 
   if (AccessControl )
     snprintf( acl, sizeof(acl), "x-amz-acl:%s\n", AccessControl);
@@ -353,26 +351,29 @@ static char * GetStringToSign ( char * resource,  int resSize,
     rrs[0] = 0;
 
   if( strcmp(method, "DELETE") == 0 ) {
-    snprintf ( reqToSign, sizeof(reqToSign),"%s\n\n%s\n%s\n/%s",
+    snprintf ( reqToSign, sizeof(reqToSign),"%s\n\n%s\n%s\n/%s/%s",
                method,
                MimeType ? MimeType : "",
                *date,
+               bucket,
                resource );
   }
   else if( strcmp(method, "PUT") == 0 ) {
-    snprintf ( reqToSign, sizeof(reqToSign),"%s\n\n%s\n%s\n%s%s/%s",
+    snprintf ( reqToSign, sizeof(reqToSign),"%s\n\n%s\n%s\n%s%s/%s/%s",
                method,
                MimeType ? MimeType : "",
                *date,
                acl,
                rrs,
+               bucket,
                resource );
   }
   else if( strcmp(method, "GET") == 0 ) {
-    snprintf ( reqToSign, sizeof(reqToSign),"%s\n\n%s\n%s\n/%s",
+    snprintf ( reqToSign, sizeof(reqToSign),"%s\n\n%s\n%s\n/%s/%s",
                method,
                MimeType ? MimeType : "",
                *date,
+               bucket,
                resource );
   }
   
@@ -683,7 +684,7 @@ static int s3_do_put ( IOBuf *b, char * const signature,
   snprintf ( Buf, sizeof(Buf), "Authorization: AWS %s:%s", awsKeyID, signature );
   slist = curl_slist_append(slist, Buf );
 
-  snprintf ( Buf, sizeof(Buf), "http://%s/%s", S3Host , resource );
+  snprintf ( Buf, sizeof(Buf), "http://%s.%s/%s", Bucket, S3Host , resource );
 
   curl_easy_setopt ( ch, CURLOPT_HTTPHEADER, slist);
   curl_easy_setopt ( ch, CURLOPT_URL, Buf );
@@ -726,7 +727,7 @@ static int s3_do_get ( IOBuf *b, char * const signature,
   snprintf ( Buf, sizeof(Buf), "Authorization: AWS %s:%s", awsKeyID, signature );
   slist = curl_slist_append(slist, Buf );
 
-  snprintf ( Buf, sizeof(Buf), "http://%s/%s", S3Host, resource );
+  snprintf ( Buf, sizeof(Buf), "http://%s.%s/%s", Bucket, S3Host , resource );
 
   curl_easy_setopt ( ch, CURLOPT_HTTPHEADER, slist);
   curl_easy_setopt ( ch, CURLOPT_URL, Buf );
@@ -762,7 +763,7 @@ static int s3_do_delete ( IOBuf *b, char * const signature,
   snprintf ( Buf, sizeof(Buf), "Authorization: AWS %s:%s", awsKeyID, signature );
   slist = curl_slist_append(slist, Buf );
 
-  snprintf ( Buf, sizeof(Buf), "http://%s/%s", S3Host, resource );
+  snprintf ( Buf, sizeof(Buf), "http://%s.%s/%s", Bucket, S3Host , resource );
 
   curl_easy_setopt ( ch, CURLOPT_CUSTOMREQUEST, "DELETE");
   curl_easy_setopt ( ch, CURLOPT_HTTPHEADER, slist);

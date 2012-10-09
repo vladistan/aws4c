@@ -227,6 +227,7 @@ main (int argc, char *argv[]) {
     if(rc != 0) {
       return rc;
     }
+    printf ( "MD5SUM matches, file uploaded successfully \n" );
   }
   
   // GET file
