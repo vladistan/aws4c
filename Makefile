@@ -21,7 +21,7 @@ dist:
 
 clean:
 	$(RM) *.exe
-	$(RM) s3_get s3_put s3_delete sqs_example aws4c.o
+	$(RM) s3_get s3_put s3_delete sqs_example aws4c.o md5util.o
 	$(RM) s3util
 	$(RM) *.tgz
 	$(RM) -r ${DNAME}
