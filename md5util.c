@@ -37,6 +37,8 @@ verifyMD5(char * filename, char * md5sum) {
     sprintf(result + i * 2, "%02x", hash[i]);
   }
   
+  fclose(fd);
+  
   if( (strcmp(md5sum, result)) == 0) {
     // All is well, md5sum matches
     return 0;
