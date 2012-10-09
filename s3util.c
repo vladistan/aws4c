@@ -229,6 +229,7 @@ main (int argc, char *argv[]) {
       rc = verifyMD5(filename, s3replyMD5);
     }
     if(rc != 0) {
+      printf ( "PUT operation was unsuccessful \n" );
       return rc;
     }
     printf ( "MD5SUM matches, file uploaded successfully \n" );
@@ -237,11 +238,23 @@ main (int argc, char *argv[]) {
   // GET file
   else if( strcmp(operation, "GET") == 0 ) {
     rv = get_file( aws_buf, filename );
+    if(rv == 0 && aws_buf->code == 200) {
+      printf ( "File was successfully downloaded \n" );
+    }
+    else {
+      printf ( "GET operation was unsuccessful \n" );
+    }
   }
   
   // DELETE FILE
   else if( strcmp(operation, "DELETE") == 0 ) {
     rv = delete_file( aws_buf, filename );
+    if(rv == 0 && aws_buf->code == 204) {
+      printf ( "File was successfully deleted \n" );
+    }
+    else {
+      printf ( "DELETE operation was unsuccessful \n" );
+    }
   }
   else {
     fprintf(stderr, "Invalid operation, operation must be one of "
@@ -249,12 +262,15 @@ main (int argc, char *argv[]) {
     exit(1);
   }
   
+  /*
   printf ( "RV %d\n", rv );
   printf ( "CODE    [%d] \n", aws_buf->code );
   printf ( "RESULT  [%s] \n", aws_buf->result );
   printf ( "LEN     [%d] \n", aws_buf->len );
   printf ( "LASTMOD [%s] \n", aws_buf->lastMod );
   printf ( "ETAG    [%s] \n", aws_buf->eTag );
+  */
+  
   aws_iobuf_free(aws_buf);
   
   global_free();
