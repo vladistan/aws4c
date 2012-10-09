@@ -73,6 +73,7 @@ int   get_file( IOBuf * aws_buf, char *name ) {
     if( (fp = fopen(name, "rb")) != NULL) {
       fprintf(stdout, "WARNING: The specified file already exist. \n"
                       "Refuse to overwrite. \n");
+      fclose(fp);
       return -1;
     }
     // File doesn't exist yet. Okay to write :)
@@ -89,6 +90,7 @@ int   get_file( IOBuf * aws_buf, char *name ) {
             return -1;
           }
       }
+      fclose(fp);
     }
   }
   return rv;
