@@ -243,6 +243,7 @@ main (int argc, char *argv[]) {
     }
     else {
       printf ( "GET operation was unsuccessful \n" );
+      return(-1);
     }
   }
   
@@ -254,12 +255,13 @@ main (int argc, char *argv[]) {
     }
     else {
       printf ( "DELETE operation was unsuccessful \n" );
+      return(-1);
     }
   }
   else {
     fprintf(stderr, "Invalid operation, operation must be one of "
     "{PUT, GET, DELETE}\n");
-    exit(1);
+    return(1);
   }
   
   /*
