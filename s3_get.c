@@ -57,12 +57,13 @@ int main ( int argc, char * argv[] )
   while(-1)
     {
   char Ln[1024];
-  int sz = aws_iobuf_getline ( bf, Ln, sizeof(Ln));
+  int sz = aws_iobuf_getdata ( bf, Ln, sizeof(Ln));
   if ( Ln[0] == 0 ) break;
   printf ( "S[%3d] %s", sz, Ln );
     }
 
   aws_iobuf_free ( bf );
-
+  
+  aws_deinit ();
   return 0;
 }
