@@ -16,6 +16,7 @@
 int   put_file( IOBuf * aws_buf, char *name );
 int   get_file( IOBuf * aws_buf, char *name );
 int   delete_file( IOBuf * aws_buf, char *name );
+char  *getFilenameFromPath( char *name );
 void  global_free();
 
 char  *operation    = NULL;
@@ -30,9 +31,11 @@ char  * S3_acl      = "private";
  * according to the configuration details
  */
 
-int   put_file( IOBuf * aws_buf, char *name ) {
+int
+put_file( IOBuf * aws_buf, char *name ) {
   FILE  * fp;
   char readbuf[BUF_SIZE];
+  char * filename;
   
   // Read in file to upload
   if( (fp = fopen(name, "rb")) == NULL) {
@@ -57,13 +60,22 @@ int   put_file( IOBuf * aws_buf, char *name ) {
     fclose(fp);
   }
   
-  int rv = s3_put(aws_buf, name);  
+  // Strip the full path from the name and replace spaces with %20
+  filename = getFilenameFromPath(name);
+  
+  int rv = s3_put(aws_buf, filename);
+  
+  free(filename);
   return rv;
 }
 
 
-int   get_file( IOBuf * aws_buf, char *name ) {
-  int rv = s3_get(aws_buf, name);
+int
+get_file( IOBuf * aws_buf, char *name ) {
+  char * filename;
+  filename = getFilenameFromPath(name);
+
+  int rv = s3_get(aws_buf, filename);
   if(rv == 0 && aws_buf->code == 200 && aws_buf->len != 0) {
     FILE  * fp;
     char writebuf[BUF_SIZE];
@@ -96,13 +108,54 @@ int   get_file( IOBuf * aws_buf, char *name ) {
   return rv;
 }
 
-int   delete_file( IOBuf * aws_buf, char *name ) {
+int
+delete_file( IOBuf * aws_buf, char *name ) {
   int rv = s3_delete(aws_buf, name);  
   return rv;
 }
 
-
-
+char *
+getFilenameFromPath(char *name) {
+  char * realname = strrchr(name, '/');
+  // Handle case where there is no /
+  if(realname) {
+    realname++;
+  }
+  else {
+    realname = name;
+  }
+  
+  // Replace spaces with %20
+  int n, realLen, newLen, numSpaces, uploadNameIndex;
+  char * uploadName;
+  
+  realLen = strlen(realname);
+  numSpaces = uploadNameIndex = 0;
+  
+  for(n = 0; n < realLen; n++) {
+    if(realname[n] == ' ')
+      numSpaces++;
+  }
+  
+  newLen = realLen + numSpaces * 2 + 1;
+  uploadName = malloc(newLen * sizeof(char));
+  
+  for(n = 0; n < realLen; n++, uploadNameIndex++) {
+    if(realname[n] == ' ') {
+      uploadName[uploadNameIndex]   = '%'; 
+      uploadName[++uploadNameIndex] = '2';
+      uploadName[++uploadNameIndex] = '0';
+    }
+    else {
+      uploadName[uploadNameIndex] = realname[n];
+    }
+  }
+  
+  uploadName[newLen] = '\0';
+  
+  // Remember to free this after use
+  return uploadName;
+}
 
 
 int
@@ -223,6 +276,7 @@ main (int argc, char *argv[]) {
     char s3replyMD5[33];
     
     rv = put_file( aws_buf, filename );
+    rc = -1;
     if( aws_buf->eTag != NULL && strlen(aws_buf->eTag) > 2 ) {
       memset(s3replyMD5, 0, 33);
       memcpy(s3replyMD5, aws_buf->eTag + 1, 32);
