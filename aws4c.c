@@ -1257,18 +1257,18 @@ void   aws_iobuf_append ( IOBuf *B, char * d, int len )
   N->buf[len] = 0;
   B->len += len;
 
-  if ( B->first == NULL )
+  if ( B->head == NULL )
     {
-      B->first   = N;
+      B->head    = N;
       B->current = N;
+      B->tail    = N;
       B->pos     = N->buf;
     }
   else
     {
-      // Find the last block
-      IOBufNode * D = B->first;
-      while(D->next != NULL ) D = D->next;
+      IOBufNode * D = B->tail;
       D->next = N;
+      B->tail = N;
     }
 }
 
@@ -1293,6 +1293,7 @@ int aws_iobuf_getdata(IOBuf *B, char *buffer, size_t size) {
     
     if (nLeft) {
       node = node->next;
+      B->current = node;
     }
   }
   return nRead;
@@ -1303,7 +1304,7 @@ int aws_iobuf_getdata(IOBuf *B, char *buffer, size_t size) {
 void   aws_iobuf_free ( IOBuf * bf )
 { 
   /// Release Things
-  IOBufNode * N = bf->first;
+  IOBufNode * N = bf->head;
   if ( bf->result  != NULL ) free ( bf->result  );
   if ( bf->lastMod != NULL ) free ( bf->lastMod );
   if ( bf->eTag    != NULL ) free ( bf->eTag    );

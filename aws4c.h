@@ -27,8 +27,9 @@ typedef struct _IOBufNode
 /// IOBuf structure
 typedef struct IOBuf 
 {
-  IOBufNode * first;
-  IOBufNode * current;
+  IOBufNode * head;    // First node
+  IOBufNode * current;  // Current node
+  IOBufNode * tail;  // Last node
   char   * pos;
 
   char * result;
