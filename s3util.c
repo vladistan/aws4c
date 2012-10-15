@@ -228,7 +228,7 @@ main (int argc, char *argv[]) {
       memcpy(s3replyMD5, aws_buf->eTag + 1, 32);
       rc = verifyMD5(filename, s3replyMD5);
     }
-    if(rc != 0) {
+    if(rv != 0 || rc != 0) {
       printf ( "PUT operation was unsuccessful \n" );
       return rc;
     }
