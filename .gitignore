@@ -4,3 +4,6 @@ s3_get
 s3_put
 sqs_example
 *.tmp
+
+/aws4c.o
+/.svn/
