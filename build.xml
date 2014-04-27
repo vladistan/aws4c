@@ -1,0 +1,105 @@
+<project name="duplicatecheck" default="cpd" xmlns:ivy="antlib:org.apache.ivy.ant">
+
+
+<property name="ivy.install.version" value="2.0.0-beta1"/>
+<property name="ivy.jar.dir" value="${basedir}/ivy"/>
+<property name="ivy.jar.file" value="${ivy.jar.dir}/ivy.jar"/>
+<property name="build.dir" value="build"/>
+<property name="src.dir" value="src"/>
+<property name="lib.dir" value="lib"/>
+
+<property name="files.dir" value="."/>
+<property name="output.dir" value="target"/>
+
+<property name="pmd.version" value="5.1.0" />
+<property name="pmd.install.dir" location="${lib.dir}/pmd" />
+
+<property name="cppncss.version" value="1.0.5" />
+<property name="cppncss.install.dir" location="${lib.dir}/cppncss" />
+
+<property name="pmd.dir" location="${build.dir}/pmd" />
+<property name="pmd.failonerror" value="false" />
+
+<target name="download-ivy" unless="skip.download">
+<mkdir dir="${ivy.jar.dir}"/>
+<!--
+ download Ivy from web site so that it can be used even without any special installation 
+-->
+<echo message="installing ivy..."/>
+<get src="http://repo1.maven.org/maven2/org/apache/ivy/ivy/${ivy.install.version}/ivy-${ivy.install.version}.jar" dest="${ivy.jar.file}" usetimestamp="true"/>
+</target>
+
+
+<target name="install-ivy" depends="download-ivy" description="--> install ivy">
+<!--
+ try to load ivy here from local ivy dir, in case the user has not already dropped
+    	      it into ant's lib dir (note that the latter copy will always take precedence).
+    	      We will not fail as long as the ivy jar is in at least one of ant's lib dir or 
+    	      the local lib dir. 
+-->
+<path id="ivy.lib.path">
+<pathelement location="${ivy.jar.file}"/>
+</path>
+<taskdef resource="org/apache/ivy/ant/antlib.xml" uri="antlib:org.apache.ivy.ant" classpathref="ivy.lib.path"/>
+</target>
+
+
+<target name="clean-ivy" description="--> clean the ivy installation">
+<delete dir="${ivy.jar.dir}"/>
+</target>
+
+
+<!-- Download PMD from Ivy if necessary. -->
+  <target name="install-pmd" depends="install-ivy">
+    <ivy:retrieve module="pmd" organisation="net.sourceforge.pmd" revision="${pmd.version}" pattern="${lib.dir}/pmd/[artifact].[ext]" sync="true" inline="true" log="download-only" type="jar,report"/>
+  </target>
+
+
+   
+
+   <target name="install-cppncss" depends="install-ivy">
+    <ivy:retrieve module="cppncss" organisation="net.sourceforge.cppncss" revision="${cppncss.version}" pattern="${lib.dir}/cppncss/[artifact].[ext]" sync="true" inline="true" log="download-only" type="jar"/>
+  </target>
+<!--
+http://sourceforge.net/projects/cppncss/files/cppncss/1.0.3/cppncss-1.0.3.zip/download
+-->
+
+<target name="mk-target-dir">
+    <mkdir dir="${output.dir}"/>
+</target>
+
+<target name="cpd" depends="install-pmd,mk-target-dir" >
+    <taskdef name="cpd" classname="net.sourceforge.pmd.cpd.CPDTask">
+	 <classpath>
+        <fileset dir="${pmd.install.dir}" includes="*.jar" />
+      </classpath>
+    </taskdef>
+    <cpd minimumTokenCount="20" 
+         language="cpp" 
+         outputFile="${output.dir}/cpd.xml"
+         ignoreLiterals="true"
+         ignoreIdentifiers="true"
+         format="xml">
+        <fileset dir=".">
+            <include name="**/*.h"/>
+            <include name="**/*.c"/>
+                <!-- exclude third-party stuff -->
+            <exclude name="boost/"/>
+            <exclude name="cppunit/"/>
+        </fileset>
+    </cpd>
+</target>
+
+<target name="cppncss" depends="install-cppncss,install-pmd,mk-target-dir">
+<taskdef name="cppncss" classname="cppncss.CppNcssTask">
+  <classpath>
+    <fileset dir="${cppncss.install.dir}" includes="*.jar" />
+    <fileset dir="${pmd.install.dir}" includes="*.jar" />
+  </classpath>
+</taskdef>
+<cppncss tofile="target/cppncss.xml" samples="900">
+  <fileset dir="."/>
+</cppncss>
+</target>
+
+</project>

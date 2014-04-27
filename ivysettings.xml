@@ -1,0 +1,9 @@
+<ivysettings>
+    <settings defaultResolver="chain"/>
+    <resolvers>
+        <chain name="chain">
+            <ibiblio name="central" m2compatible="true"/>
+            <ibiblio name="nexus" m2compatible="true" root="http://art-repo.home.v-lad.org:8081/nexus/content/repositories/thirdparty"/>
+        </chain>
+    </resolvers>
+</ivysettings>

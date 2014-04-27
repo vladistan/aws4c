@@ -7,3 +7,5 @@ sqs_example
 
 /aws4c.o
 /.svn/
+
+/target/
