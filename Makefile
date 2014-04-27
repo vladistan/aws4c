@@ -1,6 +1,7 @@
 
 VERSION=0.5
 DNAME="aws4c-${VERSION}"
+LDLIBS=`curl-config --libs` -lcrypto
 
 CFLAGS = -g -Wall
 all: s3_get s3_put sqs_example s3_delete
@@ -23,5 +24,6 @@ clean:
 	-rm *.tgz
 	-rm -rf ${DNAME}
 	
+test: aws4c_test.o aws4c.o
+	$(CXX) -o $@ $^  $(LDLIBS)  -lCppUTest --coverage
 
-LDLIBS=`curl-config --libs` -lcrypto

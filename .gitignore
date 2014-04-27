@@ -9,3 +9,12 @@ sqs_example
 /.svn/
 
 /target/
+
+/test
+
+/lib/
+/ivy/
+
+/aws4c_test.o
+
+*.swp
