@@ -1,0 +1,7 @@
+
+set ruleExclusions(T005) {
+    some_file.cpp
+    some_other_file.cpp
+}
+
+
