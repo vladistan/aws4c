@@ -18,3 +18,5 @@ sqs_example
 /aws4c_test.o
 
 *.swp
+
+*.gcno

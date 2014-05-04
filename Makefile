@@ -3,8 +3,12 @@ VERSION=0.5
 DNAME="aws4c-${VERSION}"
 LDLIBS=`curl-config --libs` -lcrypto
 
-CFLAGS = -g -Wall
+CFLAGS = -g -Wall 
 all: s3_get s3_put sqs_example s3_delete
+
+ifeq ($(WITH_COVERAGE),Y)
+CFLAGS += -g -pg -fprofile-arcs -ftest-coverage -Wno-write-strings
+endif
 
 aws4c.o: aws4c.h
 
@@ -23,6 +27,7 @@ clean:
 	-rm s3_get s3_put sqs_example
 	-rm *.tgz
 	-rm -rf ${DNAME}
+	-rm aws4_test.o  aws4c.o
 	
 test: aws4c_test.o aws4c.o
 	$(CXX) -o $@ $^  $(LDLIBS)  -lCppUTest --coverage
