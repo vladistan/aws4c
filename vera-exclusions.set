@@ -1,7 +1,13 @@
 
-set ruleExclusions(T005) {
-    some_file.cpp
-    some_other_file.cpp
+set ruleExclusions(L001) {
+    aws4c.c
+    sqs_example.c
 }
+
+set ruleExclusions(L002) {
+    aws4c.c
+    sqs_example.c
+}
+
 
 
