@@ -70,6 +70,7 @@ static char * MimeType = NULL;
 static char * AccessControl = NULL;
 
 static void __debug ( char *fmt, ... ) ;
+STATIC char * __aws_get_iso_date_t (time_t t);
 static char * __aws_get_iso_date ();
 static char * __aws_get_httpdate ();
 static FILE * __aws_getcfg ();
@@ -225,16 +226,21 @@ static size_t header ( void * ptr, size_t size, size_t nmemb, void * stream )
 
 /// Get Data for authentication of SQS request
 /// \return date in ISO format
-static char * __aws_get_iso_date ()
+STATIC char * __aws_get_iso_date_t (time_t t)
 {
   static char dTa[256];
-  time_t t = time(NULL);
   struct tm * gTime = gmtime ( & t );
 
   memset ( dTa, 0 , sizeof(dTa));
   strftime ( dTa, sizeof(dTa), "%FT%H:%M:%SZ", gTime );
   __debug ( "Request Time: %s", dTa );
   return dTa;
+}
+
+STATIC char * __aws_get_iso_date ()
+{
+  time_t t = time(NULL);
+  return __aws_get_iso_date_t (t);
 }
 
 #ifdef ENABLE_DUMP
