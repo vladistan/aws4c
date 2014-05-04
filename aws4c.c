@@ -72,7 +72,8 @@ static char * AccessControl = NULL;
 static void __debug ( char *fmt, ... ) ;
 STATIC char * __aws_get_iso_date_t (time_t t);
 static char * __aws_get_iso_date ();
-static char * __aws_get_httpdate ();
+STATIC char * __aws_get_httpdate_t (time_t t);
+STATIC char * __aws_get_httpdate ();
 static FILE * __aws_getcfg ();
 static int s3_do_get ( IOBuf *b, char * const signature, 
 			  char * const date, char * const resource );
@@ -276,18 +277,23 @@ static void __debug ( char *fmt, ... ) {
 }
 
 
-/// Get Request Date
-/// \internal
-/// \return date in HTTP format
-static char * __aws_get_httpdate ()
+STATIC char * __aws_get_httpdate_t (time_t t)
 {
   static char dTa[256];
-  time_t t = time(NULL);
   struct tm * gTime = gmtime ( & t );
   memset ( dTa, 0 , sizeof(dTa));
   strftime ( dTa, sizeof(dTa), "%a, %d %b %Y %H:%M:%S +0000", gTime );
   __debug ( "Request Time: %s", dTa );
   return dTa;
+}
+
+/// Get Request Date
+/// \internal
+/// \return date in HTTP format
+STATIC char * __aws_get_httpdate()
+{
+  time_t t = time(NULL);
+  return __aws_get_httpdate_t(t);
 }
 
 /// Internal function to get configuration file

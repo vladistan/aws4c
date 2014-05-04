@@ -13,6 +13,11 @@ TEST_GROUP(IsoDate)
 {
 };
 
+TEST_GROUP(HttpDate)
+{
+};
+
+
 
 TEST(ChompTest, FirstTest)
 {
@@ -23,6 +28,8 @@ TEST(ChompTest, FirstTest)
 
 extern "C" void __chomp ( char  * str );
 extern "C" char * __aws_get_iso_date_t (time_t t);
+extern "C" char * __aws_get_httpdate_t(time_t t);
+
 
 
 TEST(ChompTest, Chomp_ShouldHandleEmptyString)
@@ -72,6 +79,13 @@ TEST(IsoDate, IsoDateReturnsCorrectDate)
 {
    char * testStr = __aws_get_iso_date_t(1312345678);
    STRCMP_EQUAL("2011-08-03T04:27:58Z",testStr);
+}
+
+
+TEST(HttpDate, HttpDateReturnsCorrectDate)
+{
+   char * testStr = __aws_get_httpdate_t(1312345678);
+   STRCMP_EQUAL("Wed, 03 Aug 2011 04:27:58 +0000",testStr);
 }
 
 
