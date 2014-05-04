@@ -20,3 +20,7 @@ sqs_example
 *.swp
 
 *.gcno
+
+*.gcda
+
+/vera.xml

@@ -80,7 +80,7 @@ static int s3_do_put ( IOBuf *b, char * const signature,
 static int s3_do_delete ( IOBuf *b, char * const signature, 
 			  char * const date, char * const resource );
 static char* __aws_sign ( char * const str );
-static void __chomp ( char  * str );
+STATIC void __chomp ( char  * str );
 
 #ifdef ENABLE_UNBASE64
 /// Decode base64 into binary
@@ -144,7 +144,7 @@ static char *__b64_encode(const unsigned char *input, int length)
 
 /// Chomp (remove the trailing '\n' from the string
 /// \param str string
-static void __chomp ( char  * str )
+STATIC void __chomp ( char  * str )
 {
   if ( str[0] == 0 ) return;
   int ln = strlen(str);

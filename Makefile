@@ -7,8 +7,10 @@ CFLAGS = -g -Wall
 all: s3_get s3_put sqs_example s3_delete
 
 ifeq ($(WITH_COVERAGE),Y)
-CFLAGS += -g -pg -fprofile-arcs -ftest-coverage -Wno-write-strings
+CFLAGS += -g -pg -fprofile-arcs -ftest-coverage -Wno-write-strings -DTESTING=1
 endif
+
+CXXFLAGS = $(CFLAGS)
 
 aws4c.o: aws4c.h
 

@@ -16,6 +16,18 @@ TEST(FirstTestGroup, FirstTest)
    CHECK(true);
 }
 
+extern STATIC "C" void __chomp ( char  * str );
+
+TEST(FirstTestGroup, Chomp_ShouldHandleEmptyString)
+{
+   char * testStr = "";    
+
+   __chomp(testStr);
+
+   STRCMP_EQUAL("",testStr);
+
+}
+
 int main(int ac, char** av)
 {
     return CommandLineTestRunner::RunAllTests(ac, av);

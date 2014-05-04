@@ -71,3 +71,10 @@ void   aws_iobuf_append ( IOBuf *B, char * d, int len );
 int    aws_iobuf_getline   ( IOBuf * B, char * Line, int size );
 void   aws_iobuf_free ( IOBuf * bf );
 
+/* Make internal functions non-static when doing unit tests */
+#ifdef TESTING
+#define STATIC 
+#else
+#define STATIC static
+#endif
+
