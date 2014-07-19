@@ -1188,8 +1188,6 @@ int sqs_delete_message ( IOBuf * bf, char * const url, char * receipt )
   \}
 */
 
-
-
 /*!
   \defgroup iobuf I/O Buffer functions
   \{
@@ -1256,7 +1254,7 @@ int    aws_iobuf_getline   ( IOBuf * B, char * Line, int size )
       if ( *B->pos == 0 ) 
       {
 	B->current = B->current->next;
-	if ( B->current == NULL ) break;
+	if ( B->current == NULL ) { break; }
 	B->pos = B->current->buf;
 	continue;
       }
@@ -1281,7 +1279,7 @@ void   aws_iobuf_free ( IOBuf * bf )
   if ( bf->eTag    != NULL ) { free ( bf->eTag    ); }
   free (bf);
 
-  if ( N == NULL ) return;
+  if ( N == NULL ) { return; }
 
   /// Walk down the list and release blocks
   while ( N->next != NULL )
