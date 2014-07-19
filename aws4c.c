@@ -123,7 +123,7 @@ static char *unbase64(unsigned char *input, int length)
 /// \param length length of the input text
 /// \internal
 /// \return a newly allocated buffer with base64 encoded data 
-static char *__b64_encode(const unsigned char *input, int length)
+STATIC char *__b64_encode(const unsigned char *input, int length)
 {
   BIO *bmem, *b64;
   BUF_MEM *bptr;

@@ -18,6 +18,10 @@ TEST_GROUP(HttpDate)
 };
 
 
+TEST_GROUP(Base64)
+{
+};
+
 
 TEST(ChompTest, FirstTest)
 {
@@ -29,6 +33,51 @@ TEST(ChompTest, FirstTest)
 extern "C" void __chomp ( char  * str );
 extern "C" char * __aws_get_iso_date_t (time_t t);
 extern "C" char * __aws_get_httpdate_t(time_t t);
+extern "C" void __chomp ( char  * str );
+extern "C" char *__b64_encode(const unsigned char *input, int length);
+
+
+TEST(Base64,  Base64_ShouldEncodeSimpleStringRight)
+{
+
+ const unsigned char * input = (unsigned char *)"ABCD";
+ char *out =  __b64_encode(input, 4);
+
+ STRCMP_EQUAL("QUJDRA==",out);
+
+}
+
+TEST(Base64,  Base64_ShouldEncodeWorkWithEmptyStrings)
+{
+
+ const unsigned char * input = (unsigned char *)"";
+ char *out =  __b64_encode(input, 1);
+
+ STRCMP_EQUAL("AA==",out);
+
+}
+
+TEST(Base64,  Base64_ShouldEncodeIncludingTerminator)
+{
+
+ const unsigned char * input = (unsigned char *)"ABCD";
+ char *out =  __b64_encode(input, 5);
+
+ STRCMP_EQUAL("QUJDRAA=",out);
+
+}
+
+
+TEST(Base64,  Base64_ShouldEncodeIncludingNullInTheMiddle)
+{
+
+ const unsigned char * input = (unsigned char *)"AB\0CD";
+ char *out =  __b64_encode(input, 6);
+
+ STRCMP_EQUAL("QUIAQ0QA",out);
+
+}
+
 
 
 
