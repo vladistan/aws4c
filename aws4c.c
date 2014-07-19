@@ -232,7 +232,7 @@ STATIC char * __aws_get_iso_date_t (time_t t)
   static char dTa[256];
   struct tm * gTime = gmtime ( & t );
 
-  memset ( dTa, 0 , sizeof(dTa));
+  memset ( dTa, 0, sizeof(dTa));
   strftime ( dTa, sizeof(dTa), "%FT%H:%M:%SZ", gTime );
   __debug ( "Request Time: %s", dTa );
   return dTa;
@@ -264,9 +264,10 @@ static void Dump ()
 /// Print debug output
 /// \internal
 /// \param fmt printf like formating string
-static void __debug ( char *fmt, ... ) {
+static void __debug ( char *fmt, ... ) 
+{
   /// If debug flag is not set we won't print anything
-  if ( ! debug ) return ;
+  if ( ! debug ) { return; }
   /// Otherwise process the arguments and print the result
   va_list args;
   va_start( args, fmt );
@@ -281,7 +282,7 @@ STATIC char * __aws_get_httpdate_t (time_t t)
 {
   static char dTa[256];
   struct tm * gTime = gmtime ( & t );
-  memset ( dTa, 0 , sizeof(dTa));
+  memset ( dTa, 0, sizeof(dTa));
   strftime ( dTa, sizeof(dTa), "%a, %d %b %Y %H:%M:%S +0000", gTime );
   __debug ( "Request Time: %s", dTa );
   return dTa;
@@ -308,7 +309,7 @@ static FILE * __aws_getcfg ()
 
   struct stat sBuf;
   rv = stat ( ConfigFile, &sBuf );
-  if ( rv == -1 ) return NULL;
+  if ( rv == -1 ) { return NULL; }
 
   
   if ( sBuf.st_mode & 066   ||
@@ -348,24 +349,24 @@ static char * GetStringToSign ( char * resource,  int resSize,
   
   * date = __aws_get_httpdate();
 
-  memset ( resource,0,resSize);
+  memset ( resource, 0, resSize);
   if ( bucket != NULL )
-    snprintf ( resource, resSize,"%s/%s", bucket, file );
+    { snprintf ( resource, resSize, "%s/%s", bucket, file ); }
   else
-    snprintf ( resource, resSize,"%s", file );
+    { snprintf ( resource, resSize, "%s", file ); }
 
   if (AccessControl)
-    snprintf( acl, sizeof(acl), "x-amz-acl:%s\n", AccessControl);
+    { snprintf( acl, sizeof(acl), "x-amz-acl:%s\n", AccessControl); }
   else
-    acl[0] = 0;
+    { acl[0] = 0; }
 
   if (useRrs)
-    strncpy( rrs, "x-amz-storage-class:REDUCED_REDUNDANCY\n", sizeof(rrs));  
+    { strncpy( rrs, "x-amz-storage-class:REDUCED_REDUNDANCY\n", sizeof(rrs)); }  
   else
-    rrs[0] = 0;
+    { rrs[0] = 0; }
 
 
-  snprintf ( reqToSign, sizeof(reqToSign),"%s\n\n%s\n%s\n%s%s/%s",
+  snprintf ( reqToSign, sizeof(reqToSign), "%s\n\n%s\n%s\n%s%s/%s",
 	     method,
 	     MimeType ? MimeType : "",
 	     *date,
@@ -375,7 +376,7 @@ static char * GetStringToSign ( char * resource,  int resSize,
 
   // EU: If bucket is in virtual host name, remove bucket from path
   if (bucket && strncmp(S3Host, bucket, strlen(bucket)) == 0)
-    snprintf ( resource, resSize,"%s", file );
+    { snprintf ( resource, resSize, "%s", file ); }
 
   return __aws_sign(reqToSign);
 }
@@ -390,7 +391,7 @@ STATIC void __aws_urlencode ( char * src, char * dest, int nDest )
   const char * hexDigit = "0123456789ABCDEF";
 
   n = 0;
-  for ( i = 0 ; src[i] ; i ++ )
+  for ( i = 0; src[i]; i ++ )
     {
       if ( n + 5 > nDest ) 
 	{ puts ( "URLEncode:: Dest buffer to small.. can't continue \n" ); exit(0); }
@@ -401,7 +402,7 @@ STATIC void __aws_urlencode ( char * src, char * dest, int nDest )
 	  dest[n++] = hexDigit [(c >> 4 ) & 0xF ];
 	  dest[n++] = hexDigit [c & 0xF ];
 	}
-      else dest[n++] = src[i];
+      else { dest[n++] = src[i]; }
     }
   __debug ( "Encoded To: %s", dest );
 }
@@ -416,7 +417,7 @@ static int SQSRequest ( IOBuf *b, char * verb, char * const url )
   curl_easy_setopt ( ch, CURLOPT_VERBOSE, debug );
   curl_easy_setopt ( ch, CURLOPT_INFILESIZE, b->len );
   curl_easy_setopt ( ch, CURLOPT_POST, 1 );
-  curl_easy_setopt ( ch, CURLOPT_POSTFIELDSIZE , 0 );
+  curl_easy_setopt ( ch, CURLOPT_POSTFIELDSIZE, 0 );
   curl_easy_setopt ( ch, CURLOPT_HEADERFUNCTION, header );
   curl_easy_setopt ( ch, CURLOPT_WRITEFUNCTION, writefunc );
   curl_easy_setopt ( ch, CURLOPT_WRITEDATA, b );
@@ -442,8 +443,6 @@ static char * SQSSign ( char * str )
   free ( signature );
   return strdup(RealSign);
 }
-
-
 
 /*!
   \}
@@ -486,8 +485,6 @@ void aws_set_rrs (int r)
 { useRrs = r; }
 
 
-
-
 /// Read AWS authentication records
 /// \param id  user ID
 int aws_read_config ( char * const id )
@@ -509,25 +506,25 @@ int aws_read_config ( char * const id )
   while ( !feof(f))
     {
       ln++;
-      memset (line,0,sizeof(line));
-      fgets ( line, sizeof(line), f );
+      memset (line, 0, sizeof(line));
+      fgets  (line, sizeof(line), f );
 
   /// Skip Comments
-      if ( line[0] == '#' ) continue;
-      if ( line[0] == 0 ) continue;
+      if ( line[0] == '#' ) { continue; }
+      if ( line[0] == 0 ) { continue; }
 
       __chomp ( line );
       
 
 	/// Split the line on ':'
-      char * keyID = strchr(line,':');
+      char * keyID = strchr(line, ':');
       if ( keyID == NULL )
 	{ printf ( "Syntax error in credentials file line %d, no keyid\n", ln );
 	  exit(1);
 	}
       *keyID = 0; keyID ++;
 
-      char * key = strchr(keyID,':');
+      char * key = strchr(keyID, ':');
       if ( key == NULL )
 	{ printf ( "Syntax error in credentials file line %d, no key\n", ln );
 	  exit(1);
@@ -536,7 +533,7 @@ int aws_read_config ( char * const id )
       
       
       /// If the line is correct Set the IDs
-      if ( !strcmp(line,id))
+      if ( !strcmp(line, id))
 	{
 	  aws_set_keyid ( keyID );
 	  aws_set_key   ( key   );
@@ -545,16 +542,13 @@ int aws_read_config ( char * const id )
 
     }
   /// Return error if not found
-  if ( awsKeyID == NULL ) return -1;
+  if ( awsKeyID == NULL ) { return -1; }
   return 0;
 }
 
 /*!
   \}
 */
-
-
-
 
 /*!
   \defgroup s3 S3 Interface Functions
@@ -629,13 +623,9 @@ int s3_delete ( IOBuf * b, char * const file )
   int sc = s3_do_delete( b, signature, date, resource ); 
   free ( signature );
 
-
-
   return sc;
 
 }
-
-
 
 static int s3_do_put ( IOBuf *b, char * const signature, 
 		       char * const date, char * const resource )
@@ -645,34 +635,36 @@ static int s3_do_put ( IOBuf *b, char * const signature,
   CURL* ch =  curl_easy_init( );
   struct curl_slist *slist=NULL;
 
-  if (MimeType) {
+  if (MimeType) 
+  {
     snprintf ( Buf, sizeof(Buf), "Content-Type: %s", MimeType );
     slist = curl_slist_append(slist, Buf );
   }
 
-  if (AccessControl) {
+  if (AccessControl) 
+  {
     snprintf ( Buf, sizeof(Buf), "x-amz-acl: %s", AccessControl );
     slist = curl_slist_append(slist, Buf );
   }
 
-  if (useRrs) {
+  if (useRrs) 
+  {
     strncpy ( Buf, "x-amz-storage-class: REDUCED_REDUNDANCY", sizeof(Buf) );
-    slist = curl_slist_append(slist, Buf );  }
-
-
+    slist = curl_slist_append(slist, Buf );  
+  }
 
   snprintf ( Buf, sizeof(Buf), "Date: %s", date );
   slist = curl_slist_append(slist, Buf );
   snprintf ( Buf, sizeof(Buf), "Authorization: AWS %s:%s", awsKeyID, signature );
   slist = curl_slist_append(slist, Buf );
 
-  snprintf ( Buf, sizeof(Buf), "http://%s/%s", S3Host , resource );
+  snprintf ( Buf, sizeof(Buf), "http://%s/%s", S3Host, resource );
 
   curl_easy_setopt ( ch, CURLOPT_HTTPHEADER, slist);
   curl_easy_setopt ( ch, CURLOPT_URL, Buf );
   curl_easy_setopt ( ch, CURLOPT_READDATA, b );
   if (!debug)
-    curl_easy_setopt ( ch, CURLOPT_WRITEFUNCTION, writedummyfunc );
+    { curl_easy_setopt ( ch, CURLOPT_WRITEFUNCTION, writedummyfunc ); }
   curl_easy_setopt ( ch, CURLOPT_READFUNCTION, readfunc );
   curl_easy_setopt ( ch, CURLOPT_HEADERFUNCTION, header );
   curl_easy_setopt ( ch, CURLOPT_HEADERDATA, b );
@@ -765,9 +757,6 @@ static int s3_do_delete ( IOBuf *b, char * const signature,
 
 }
 
-
-
-
 static char* __aws_sign ( char * const str )
 {
   HMAC_CTX ctx;
@@ -778,11 +767,11 @@ static char* __aws_sign ( char * const str )
 
   HMAC_CTX_init(&ctx);
   HMAC_Init(&ctx, awsKey, strlen(awsKey), EVP_sha1());
-  HMAC_Update(&ctx,(unsigned char*)str, strlen(str));
-  HMAC_Final(&ctx,(unsigned char*)MD,&len);
+  HMAC_Update(&ctx, (unsigned char*)str, strlen(str));
+  HMAC_Final(&ctx, (unsigned char*)MD, &len);
   HMAC_CTX_cleanup(&ctx);
 
-  char * b64 = __b64_encode (MD,len);
+  char * b64 = __b64_encode (MD, len);
   __debug("Signature:  %s", b64 );
 
   return b64;
@@ -790,8 +779,6 @@ static char* __aws_sign ( char * const str )
 /*!
   \}
 */
-
-
 
 #define SQS_REQ_TAIL   "&Signature=%s" "&SignatureVersion=1" "&Timestamp=%s" "&Version=2009-02-01"
 /*!
@@ -818,7 +805,7 @@ int sqs_create_queue ( IOBuf *b, char * const name )
     "?Action=CreateQueue"
     "&QueueName=%s"
     "&AWSAccessKeyId=%s"
-    SQS_REQ_TAIL ;
+    SQS_REQ_TAIL;
 
   char * Sign = "ActionCreateQueue"
                 "AWSAccessKeyId%s"
@@ -830,7 +817,7 @@ int sqs_create_queue ( IOBuf *b, char * const name )
   snprintf ( customSign, sizeof(customSign), Sign, awsKeyID, name, date );
   signature =  SQSSign ( customSign );
 
-  snprintf ( resource, sizeof(resource), SQSHost, Req , name, awsKeyID, signature, date );
+  snprintf ( resource, sizeof(resource), SQSHost, Req, name, awsKeyID, signature, date );
 
   int sc = SQSRequest( b, "POST", resource ); 
   free ( signature );
@@ -858,7 +845,7 @@ int sqs_list_queues ( IOBuf *b, char * const prefix )
     "?Action=ListQueues"
     "&QueueNamePrefix=%s"
     "&AWSAccessKeyId=%s"
-      SQS_REQ_TAIL ;
+      SQS_REQ_TAIL;
 
   char * Sign = "ActionListQueues"
                 "AWSAccessKeyId%s"
@@ -870,7 +857,7 @@ int sqs_list_queues ( IOBuf *b, char * const prefix )
   snprintf ( customSign, sizeof(customSign), Sign, awsKeyID, prefix, date );
   signature =  SQSSign ( customSign );
 
-  snprintf ( resource, sizeof(resource), Req , SQSHost , prefix, awsKeyID,
+  snprintf ( resource, sizeof(resource), Req, SQSHost, prefix, awsKeyID,
 	     signature, date );
 
   IOBuf *nb = aws_iobuf_new();
@@ -878,8 +865,8 @@ int sqs_list_queues ( IOBuf *b, char * const prefix )
   free ( signature );
 
   if ( nb->result != NULL )
-    b-> result = strdup(nb->result);
-  b-> code   = nb->code;
+    { b-> result = strdup(nb->result); }
+  b->code   = nb->code;
 
   /// \todo This only retrieves just one line in the string..
   ///       make that all URLs are returned
@@ -887,11 +874,11 @@ int sqs_list_queues ( IOBuf *b, char * const prefix )
   if ( b->code == 200 )
     {
       /// Parse Out the List Of Queues
-      while(-1)
+      while (-1)
 	{
 	  char Ln[1024];
 	  aws_iobuf_getline ( nb, Ln, sizeof(Ln));
-	  if ( Ln[0] == 0 ) break;
+	  if ( Ln[0] == 0 ) { break; }
 	  char *q = strstr ( Ln, "<QueueUrl>" );
 	  if ( q != 0 )
 	    {
@@ -934,7 +921,7 @@ int sqs_get_queueattributes ( IOBuf *b, char * url, int *timeOut, int *nMesg )
     "&AttributeName.1=VisibilityTimeout"
     "&AttributeName.2=ApproximateNumberOfMessages"
     "&AWSAccessKeyId=%s"
-    SQS_REQ_TAIL ;
+    SQS_REQ_TAIL;
 
   char * Sign = 
     "ActionGetQueueAttributes"
@@ -949,18 +936,18 @@ int sqs_get_queueattributes ( IOBuf *b, char * url, int *timeOut, int *nMesg )
   snprintf ( customSign, sizeof(customSign), Sign, awsKeyID, date );
   signature =  SQSSign ( customSign );
 
-  snprintf ( resource, sizeof(resource), Req , url, awsKeyID, signature, date );
+  snprintf ( resource, sizeof(resource), Req, url, awsKeyID, signature, date );
 
   const char *pfxVisTO = "<Name>VisibilityTimeout</Name><Value>";
   const char *pfxQLen  = "<Name>ApproximateNumberOfMessages</Name><Value>";
 
 
   int sc = SQSRequest( b, "POST", resource ); 
-  while(-1) 
+  while (-1) 
     {
       char Ln[1024];
       aws_iobuf_getline ( b, Ln, sizeof(Ln));
-      if ( Ln[0] == 0 ) break;
+      if ( Ln[0] == 0 ) { break; }
       
       char *q;
       q = strstr ( Ln, pfxVisTO );
@@ -993,7 +980,7 @@ int sqs_set_queuevisibilitytimeout ( IOBuf *b, char * url, int sec )
     "&Attribute.1.Name=VisibilityTimeout"
     "&Attribute.1.Value=%d"
     "&AWSAccessKeyId=%s"
-    SQS_REQ_TAIL ;
+    SQS_REQ_TAIL;
 
   char * Sign = 
     "ActionSetQueueAttributes"
@@ -1008,7 +995,7 @@ int sqs_set_queuevisibilitytimeout ( IOBuf *b, char * url, int sec )
   snprintf ( customSign, sizeof(customSign), Sign, sec, awsKeyID, date );
   signature =  SQSSign ( customSign );
 
-  snprintf ( resource, sizeof(resource), Req , 
+  snprintf ( resource, sizeof(resource), Req, 
 	     url, sec, awsKeyID, signature, date );
 
   int sc = SQSRequest( b, "POST", resource ); 
@@ -1040,7 +1027,7 @@ int sqs_send_message ( IOBuf *b, char * const url, char * const msg )
     "?Action=SendMessage"
     "&MessageBody=%s"
     "&AWSAccessKeyId=%s"
-    SQS_REQ_TAIL ;
+    SQS_REQ_TAIL;
 
   char * Sign = 
     "ActionSendMessage"
@@ -1054,7 +1041,7 @@ int sqs_send_message ( IOBuf *b, char * const url, char * const msg )
   snprintf ( customSign, sizeof(customSign), Sign, awsKeyID, msg, date );
   signature =  SQSSign ( customSign );
 
-  snprintf ( resource, sizeof(resource), Req , 
+  snprintf ( resource, sizeof(resource), Req, 
 	     url, encodedMsg, awsKeyID, signature, date );
 
   int sc = SQSRequest( b, "POST", resource ); 
@@ -1084,7 +1071,7 @@ int sqs_get_message ( IOBuf * b, char * const url, char * id  )
     "%s/"
     "?Action=ReceiveMessage"
     "&AWSAccessKeyId=%s"
-    SQS_REQ_TAIL ;
+    SQS_REQ_TAIL;
 
   char * Sign = 
     "ActionReceiveMessage"
@@ -1097,7 +1084,7 @@ int sqs_get_message ( IOBuf * b, char * const url, char * id  )
   snprintf ( customSign, sizeof(customSign), Sign, awsKeyID, date );
   signature =  SQSSign ( customSign );
 
-  snprintf ( resource, sizeof(resource), Req , 
+  snprintf ( resource, sizeof(resource), Req, 
 	     url, awsKeyID, signature, date );
   free ( signature );
 
@@ -1111,11 +1098,11 @@ int sqs_get_message ( IOBuf * b, char * const url, char * id  )
 
       /// \todo This is really bad. Must get a real message parser
       int inBody = 0;
-      while(-1) 
+      while (-1) 
 	{
 	  char Ln[1024];
 	  aws_iobuf_getline ( bf, Ln, sizeof(Ln));
-	  if ( Ln[0] == 0 ) break;
+	  if ( Ln[0] == 0 ) { break; }
 
 	  __debug ( "%s|%s|", inBody ? ">>": "", Ln );
 	  
@@ -1127,8 +1114,8 @@ int sqs_get_message ( IOBuf * b, char * const url, char * id  )
 	    {
 	      e = strstr ( Ln, "</Body>" );
 	      if ( e ) { *e = 0; inBody = 0; }
-	      aws_iobuf_append (b,Ln,strlen(Ln));
-	      if ( ! inBody ) break;
+	      aws_iobuf_append (b, Ln, strlen(Ln));
+	      if ( ! inBody ) { break; }
 	      continue;     
 	    }
 
@@ -1145,8 +1132,8 @@ int sqs_get_message ( IOBuf * b, char * const url, char * id  )
 		{
 		  q += 6;
 		  e = strstr ( q, "</Body>" );
-		  if ( e ) *e = 0; else inBody = 1;
-		  aws_iobuf_append (b,q,strlen(q));
+		  if ( e ) { *e = 0; } else { inBody = 1; }
+		  aws_iobuf_append (b, q, strlen(q));
 		}
 	    }
 	}
@@ -1173,7 +1160,7 @@ int sqs_delete_message ( IOBuf * bf, char * const url, char * receipt )
     "?Action=DeleteMessage"
     "&ReceiptHandle=%s"
     "&AWSAccessKeyId=%s"
-      SQS_REQ_TAIL ;
+      SQS_REQ_TAIL;
 
   char * Sign = 
     "ActionDeleteMessage"
@@ -1190,7 +1177,7 @@ int sqs_delete_message ( IOBuf * bf, char * const url, char * receipt )
   char encReceipt[1024];
   __aws_urlencode ( receipt, encReceipt, sizeof(encReceipt));
 
-  snprintf ( resource, sizeof(resource), Req , url, encReceipt, awsKeyID, signature, date );
+  snprintf ( resource, sizeof(resource), Req, url, encReceipt, awsKeyID, signature, date );
   free ( signature );
 
   int sc = SQSRequest( bf, "POST", resource ); 
@@ -1232,7 +1219,7 @@ void   aws_iobuf_append ( IOBuf *B, char * d, int len )
   IOBufNode * N = malloc(sizeof(IOBufNode));
   N->next = NULL;
   N->buf  = malloc(len+1);
-  memcpy(N->buf,d,len);
+  memcpy(N->buf, d, len);
   N->buf[len] = 0;
   B->len += len;
 
@@ -1246,7 +1233,7 @@ void   aws_iobuf_append ( IOBuf *B, char * d, int len )
     {
       // Find the last block
       IOBufNode * D = B->first;
-      while(D->next != NULL ) D = D->next;
+      while (D->next != NULL ) { D = D->next; }
       D->next = N;
     }
 }
@@ -1261,7 +1248,7 @@ int    aws_iobuf_getline   ( IOBuf * B, char * Line, int size )
   int ln = 0;
   memset ( Line, 0, size );
 
-  if ( B->current == NULL ) return 0;
+  if ( B->current == NULL ) { return 0; }
 
   while ( size - ln > 1 )
     {
@@ -1289,9 +1276,9 @@ void   aws_iobuf_free ( IOBuf * bf )
 { 
   /// Release Things
   IOBufNode * N = bf->first;
-  if ( bf->result  != NULL ) free ( bf->result  );
-  if ( bf->lastMod != NULL ) free ( bf->lastMod );
-  if ( bf->eTag    != NULL ) free ( bf->eTag    );
+  if ( bf->result  != NULL ) { free ( bf->result  ); }
+  if ( bf->lastMod != NULL ) { free ( bf->lastMod ); }
+  if ( bf->eTag    != NULL ) { free ( bf->eTag    ); }
   free (bf);
 
   if ( N == NULL ) return;
@@ -1303,7 +1290,7 @@ void   aws_iobuf_free ( IOBuf * bf )
       free(N);
       N = NN;
     }
-  if ( N != NULL ) free ( N );
+  if ( N != NULL ) { free ( N ); }
 }
 
 /*!

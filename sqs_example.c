@@ -1,4 +1,3 @@
-
 /*
  *
  * Copyright(c) 2009,  Vlad Korolev,  <vlad[@]v-lad.org >
@@ -42,14 +41,14 @@ void DumpResult ( int rv, IOBuf * bf )
   printf ( "CODE [%d] \n", bf->code );
   printf ( "RESULT  [%s] \n", bf->result );
   printf ( "LEN     [%d] \n", bf->len );
-  if ( bf->lastMod) printf ( "LASTMOD [%s] \n", bf->lastMod );
-  if ( bf->eTag)    printf ( "ETAG    [%s] \n", bf->eTag );
+  if ( bf->lastMod) { printf ( "LASTMOD [%s] \n", bf->lastMod ); }
+  if ( bf->eTag)    { printf ( "ETAG    [%s] \n", bf->eTag ); }
 
-  while(-1)
+  while (-1)
     {
       char Ln[1024];
       int sz = aws_iobuf_getline ( bf, Ln, sizeof(Ln));
-      if ( Ln[0] == 0 ) break;
+      if ( Ln[0] == 0 ) { break; }
       printf ( "S[%3d] %s", sz, Ln );
     }
 
@@ -71,10 +70,6 @@ int main ( int argc, char * argv[] )
       exit ( 1 );
     }
  
-
-
-
-
   /// Create the queue
   IOBuf * bf = aws_iobuf_new ();
   int rv = sqs_create_queue ( bf, "AWSCSQSSampleXX4" );
@@ -89,8 +84,6 @@ int main ( int argc, char * argv[] )
     }
   aws_iobuf_free(bf);
 
-
-
   /// Get the URL of the queue.
   /// Most applications require the full URL of the queue thath might be 
   /// different from the queue name passed to the SQSCreate queue
@@ -103,11 +96,11 @@ int main ( int argc, char * argv[] )
       exit(0); 
     }
 
-  while(-1)
+  while (-1)
     {
       char Ln[1024];
       aws_iobuf_getline ( bf, Ln, sizeof(Ln));
-      if ( Ln[0] == 0 ) break;
+      if ( Ln[0] == 0 ) { break; }
       Ln[strlen(Ln)-1] = 0;
       printf ( "Queue: [%s]\n",  Ln );
       queueURL = strdup(Ln);
@@ -118,7 +111,7 @@ int main ( int argc, char * argv[] )
 
   bf = aws_iobuf_new ();
   int timeOut, qLength;
-  rv = sqs_get_queueattributes ( bf, queueURL , &timeOut, &qLength );
+  rv = sqs_get_queueattributes ( bf, queueURL, &timeOut, &qLength );
   if ( !rv && bf->code == 200 )
     {
       printf ( "Queue Timeout = %d  Approximate Length  =  %d \n",  
@@ -126,14 +119,14 @@ int main ( int argc, char * argv[] )
     }
   else
     {
-      DumpResult(rv,bf); exit(0);
+      DumpResult(rv, bf); exit(0);
     }
     
   bf = aws_iobuf_new ();
-  rv = sqs_set_queuevisibilitytimeout ( bf, queueURL , 16 );
+  rv = sqs_set_queuevisibilitytimeout ( bf, queueURL, 16 );
   if ( rv || bf->code != 200 )
     {
-      DumpResult(rv,bf); exit(0);
+      DumpResult(rv, bf); exit(0);
     }
 
   /// Send a few messages
@@ -143,9 +136,9 @@ int main ( int argc, char * argv[] )
       puts ( "Send message" );
       bf = aws_iobuf_new ();
       char Message[256];
-      snprintf(Message,sizeof(Message),"Msg #%d  \n\n L=%d\n <A>&lt;</ResponseMetaData>", i,i);
+      snprintf(Message, sizeof(Message), "Msg #%d  \n\n L=%d\n <A>&lt;</ResponseMetaData>", i, i);
       rv = sqs_send_message ( bf, queueURL, Message );
-      if ( rv || bf->code != 200 ) { DumpResult(rv,bf); exit(0); }
+      if ( rv || bf->code != 200 ) { DumpResult(rv, bf); exit(0); }
     }
   /// Retrieve messages.
   for ( i = 0 ; i < 500 ; i ++ )
@@ -153,9 +146,9 @@ int main ( int argc, char * argv[] )
       puts ( "Get Message" );
       bf = aws_iobuf_new ();
       char receipt[1024];
-      memset ( receipt, 0 , sizeof(receipt));
+      memset ( receipt, 0, sizeof(receipt));
       rv = sqs_get_message ( bf, queueURL, receipt );
-      DumpResult(rv,bf); 
+      DumpResult(rv, bf); 
       puts ("\n----");
       printf ( "ID: %s\n", receipt );
       aws_iobuf_free(bf);
@@ -164,7 +157,7 @@ int main ( int argc, char * argv[] )
 	{
 	  bf = aws_iobuf_new ();
 	  rv = sqs_delete_message ( bf, queueURL, receipt );
-	  if ( rv || bf->code != 200 ) DumpResult(rv,bf); 
+	  if ( rv || bf->code != 200 ) { DumpResult(rv, bf); }
 	}    
       else { puts ( "Empty queue" ); break; }
   }
