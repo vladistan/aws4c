@@ -22,6 +22,10 @@ TEST_GROUP(Base64)
 {
 };
 
+TEST_GROUP(UrlEncode)
+{
+};
+
 
 TEST(ChompTest, FirstTest)
 {
@@ -35,6 +39,29 @@ extern "C" char * __aws_get_iso_date_t (time_t t);
 extern "C" char * __aws_get_httpdate_t(time_t t);
 extern "C" void __chomp ( char  * str );
 extern "C" char *__b64_encode(const unsigned char *input, int length);
+extern "C" void __aws_urlencode ( char * src, char * dest, int nDest );
+
+TEST(UrlEncode,  UrlEncode_ShouldWorkDoNothingToSimpleString)
+{
+ char * input = "ABCD";
+ char  out[25];
+
+ __aws_urlencode(input, out, sizeof(out));
+
+ STRCMP_EQUAL("ABCD",out);
+
+}
+
+TEST(UrlEncode,  UrlEncode_ShouldWorkEncodeSpecialCharsCorrectly)
+{
+ char * input = "ABCD/BB?";
+ char  out[25];
+
+ __aws_urlencode(input, out, sizeof(out));
+
+ STRCMP_EQUAL("ABCD%2FBB%3F",out);
+
+}
 
 
 TEST(Base64,  Base64_ShouldEncodeSimpleStringRight)

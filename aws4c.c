@@ -380,7 +380,7 @@ static char * GetStringToSign ( char * resource,  int resSize,
   return __aws_sign(reqToSign);
 }
 
-static void __aws_urlencode ( char * src, char * dest, int nDest )
+STATIC void __aws_urlencode ( char * src, char * dest, int nDest )
 {
   int i;
   int n;
