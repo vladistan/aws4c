@@ -1,5 +1,3 @@
-
-
 /*
  *
  * Copyright(c) 2009,  Vlad Korolev,  <vlad[@]v-lad.org >
@@ -20,13 +18,8 @@
 #include <stdlib.h>
 #include "aws4c.h"
 
-
-
-
 int main ( int argc, char * argv[] )
 {
-
-  
 
   aws_init ();
   aws_set_debug ( 1 );
@@ -54,11 +47,11 @@ int main ( int argc, char * argv[] )
   printf ( "LASTMOD [%s] \n", bf->lastMod );
   printf ( "ETAG    [%s] \n", bf->eTag );
 
-  while(-1)
+  while (-1)
     {
   char Ln[1024];
   int sz = aws_iobuf_getline ( bf, Ln, sizeof(Ln));
-  if ( Ln[0] == 0 ) break;
+  if ( Ln[0] == 0 ) { break; }
   printf ( "S[%3d] %s", sz, Ln );
     }
 

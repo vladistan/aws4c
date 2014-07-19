@@ -1,5 +1,3 @@
-
-
 /*
  *
  * Copyright(c) 2009,  Vlad Korolev,  <vlad[@]v-lad.org >
@@ -21,12 +19,8 @@
 #include "aws4c.h"
 
 
-
-
 int main ( int argc, char * argv[] )
 {
-
-  
 
   aws_init ();
   aws_set_debug ( 1 );

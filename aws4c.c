@@ -69,7 +69,7 @@ static char * Bucket   = NULL;
 static char * MimeType = NULL;
 static char * AccessControl = NULL;
 
-static void __debug ( char *fmt, ... ) ;
+static void __debug ( char *fmt, ... );
 STATIC char * __aws_get_iso_date_t (time_t t);
 static char * __aws_get_iso_date ();
 STATIC char * __aws_get_httpdate_t (time_t t);
@@ -132,7 +132,7 @@ static char *__b64_encode(const unsigned char *input, int length)
   bmem = BIO_new(BIO_s_mem());
   b64 = BIO_push(b64, bmem);
   BIO_write(b64, input, length);
-  if(BIO_flush(b64)) ; /* make gcc 4.1.2 happy */
+  if (BIO_flush(b64)) {} /* make gcc 4.1.2 happy */
   BIO_get_mem_ptr(b64, &bptr);
 
   char *buff = (char *)malloc(bptr->length);
@@ -148,13 +148,13 @@ static char *__b64_encode(const unsigned char *input, int length)
 /// \param str string
 STATIC void __chomp ( char  * str )
 {
-  if ( str[0] == 0 ) return;
+  if ( str[0] == 0 ) { return; }
   int ln = strlen(str);
   ln--;
-  if ( str[ln] == '\n' ) str[ln] = 0;
-  if ( ln == 0 ) return ;
+  if ( str[ln] == '\n' ) { str[ln] = 0; }
+  if ( ln == 0 ) { return; }
   ln--;
-  if ( str[ln] == '\r' ) str[ln] = 0;
+  if ( str[ln] == '\r' ) { str[ln] = 0; }
 }
 
 /// Handles reception of the data
