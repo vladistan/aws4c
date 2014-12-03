@@ -41,7 +41,7 @@ void DumpResult ( int rv, IOBuf * bf )
   printf ( "RV %d\n", rv );
   printf ( "CODE [%d] \n", bf->code );
   printf ( "RESULT  [%s] \n", bf->result );
-  printf ( "LEN     [%d] \n", bf->len );
+  printf ( "LEN     [%ld] \n", bf->len );
   if ( bf->lastMod) printf ( "LASTMOD [%s] \n", bf->lastMod );
   if ( bf->eTag)    printf ( "ETAG    [%s] \n", bf->eTag );
 
@@ -63,7 +63,7 @@ int main ( int argc, char * argv[] )
   /// Initialize the library.
   aws_init ();
   aws_set_debug ( 0 );
-  int rc = aws_read_config  ( "ncred" );
+  int rc = aws_read_config  ( "sample" );
   if ( rc )
     {
       puts ( "Could not find a credential in the config file" );
@@ -77,7 +77,7 @@ int main ( int argc, char * argv[] )
 
   /// Create the queue
   IOBuf * bf = aws_iobuf_new ();
-  int rv = sqs_create_queue ( bf, "AWSCSQSSampleXX4" );
+  int rv = sqs_create_queue ( bf, "AWS-SQS-Sample" );
   if ( rv || bf->code != 200 )
     { 
       /// Note that failure to create the queue suggests either a genuine
@@ -95,7 +95,7 @@ int main ( int argc, char * argv[] )
   /// Most applications require the full URL of the queue thath might be 
   /// different from the queue name passed to the SQSCreate queue
   bf = aws_iobuf_new ();
-  rv = sqs_list_queues ( bf, "AWSCSQSSampleXX4" );
+  rv = sqs_list_queues ( bf, "AWS-SQS-Sample" );
   if ( rv || bf->code != 200 )
     { 
       puts ( "Failed to retrieve list of queues.\n" );

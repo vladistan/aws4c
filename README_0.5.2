@@ -1,0 +1,113 @@
+This is not (yet) an officially-released version of aws4c.  0.5.2
+represents unofficial extensions to the 0.5 release, by Los Alamos National
+Laboratory.
+
+We attempted to preserve functionality of all interfaces provided by 0.5.
+Where new functionality was added, we've typically added new interfaces.
+
+
+(1) Extensions to IOBuf / IOBufNode.
+
+The 0.5 version simply adds strings into a linked list, via a malloc and
+strcpy().  This might be acceptable when all that's needed is to parse
+individual response headers, but we wanted to support more-efficient
+operations when large buffers are being sent or received.  Thus, it is now
+possible to add data for writing by installing user buffers directly into
+an IOBuf's linked list.  It is also possible to add storage for receiving
+data in a similar way.  In either case, the added storage may be static or
+dynamic.  Here are some typical scenarios.
+
+    // GET an object from the server into user's <data_ptr>
+    //     NOTE: this uses the "extend" functions to add unused storage
+    aws_iobuf_reset(io_buf);
+    aws_iobuf_extend_static(io_buf, data_ptr, data_length);
+    AWS4C_CHECK( s3_get(io_buf, obj_name) );
+    AWS4C_CHECK_OK( io_buf );
+
+
+    // PUT the contents of user's <data_ptr>
+    //     NOTE: this uses the "append" functions to add data
+    aws_iobuf_reset(io_buf);
+    aws_iobuf_append_static(io_buf, data_ptr, data_length);
+    AWS4C_CHECK( s3_put(io_buf, obj_name) );
+    AWS4C_CHECK_OK( io_buf );
+
+
+These use cases will typically also want to call aws_iobuf_reset() after
+completion, so as to avoid keeping a pointer internal to the IOBuf which
+will go out of scope.
+
+
+
+(2) Re-using connections
+
+In 0.5, every call to aws4c functions creates a new CURL connection.  This
+can add overhead to an application that is performing many operations.  We
+allow the user to specify that connections should be preserved, or to reset
+the connection at a specific time.
+
+
+    aws_reuse_connections(1); // begin reusing connections
+    // ...
+    aws_reset_connection();   // reset the connection once
+    // ...
+    aws_reuse_connections(0); // stop reusing connections
+
+
+
+(3) GET/PUT to/from file
+
+Companion-functions to the 0.5 head/get/put/post functions allow user to
+specify a file.  This also allows user to provide one IOBuf to capture the
+response, in addition to one used to send the request.
+
+
+
+(4) binary data
+
+The old getline() function was not very useful for reading arbitrary
+streams of binary (or text data).  We added a get_raw() function that
+ignores newlines.
+
+
+
+(5) EMC extensions
+
+EMC supports some extensions to "pure" S3, such as using byte-ranges to
+write parts of an object in parallel, or to append to an object.  These
+normally aren't legal, so you have to call a special function to allow the
+library support to be used:
+
+    // use byte-range to append to an object
+    s3_enable_EMC_extensions(1);
+    s3_set_byte_range(-1, -1);   // creates "Range: bytes=-1-"
+    s3_put(io_buf, obj_name);
+
+    // another interface to append to an object
+    s3_enable_EMC_extensions(1);
+    emc_put_append(io_buf, obj_name);
+
+    // instead of multi-part upload ...
+    s3_enable_EMC_extensions(1);
+    s3_set_byte_range(offset, length);
+    s3_put(io_buf, obj_name);
+
+
+
+(6) extras
+
+The 0.5.2 makefile builds a library, libaws4c.  We also provide some
+debugging functions and XML support, which probably should not be part of
+the default library.  Therefore, these have their own header
+(aws4c_extras.h) and are built into a separate library libaws4c_extras.
+This allows test-apps to use extra functionality, without requiring the
+production library to be as big.
+
+
+
+
+
+(7) unit-tests
+
+Feel free to add new unit-tests to test_aws.c This allows simple tests of
+new functions, and provides a crude regression-test.
