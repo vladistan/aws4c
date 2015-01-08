@@ -1,6 +1,6 @@
 all: s3_get s3_put sqs_example s3_delete lib lib_extra test_aws
 
-VERSION=0.5.2
+VERSION=0.5.3
 DNAME="aws4c-${VERSION}"
 
 LIB       = libaws4c

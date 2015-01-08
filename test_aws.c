@@ -29,7 +29,7 @@ char* const TEST_BUCKET = "test";
 
 // For tests that require communication with a server.
 // We need an ip-address
-void s3_connect(char* ip_addr) {
+void s3_connect(char* host_ip, char* proxy_ip) {
    static int connected = 0;
    if (connected)
       return;
@@ -38,8 +38,11 @@ void s3_connect(char* ip_addr) {
 	aws_reuse_connections(1);
 
    // fix this to match your site and testing target.
-	snprintf(buff, BUFF_LEN, "%s:9020", ip_addr);
+	snprintf(buff, BUFF_LEN, "%s:9020", host_ip);
 	s3_set_host(buff);
+
+   if (proxy_ip)
+      s3_set_proxy(proxy_ip);
 
    connected = 1;
 }
@@ -415,7 +418,8 @@ void test_emc_write_range(IOBuf* b) {
 
 void
 usage(char* prog_name, size_t exit_code) {
-   fprintf(stderr, "Usage: %s <ip_address> <test_number>\n", prog_name);
+   fprintf(stderr, "Usage: %s <ip_address> <test_number> [ <proxy_ip_w_optional_port> ]\n",
+           prog_name);
    exit(exit_code);
 }
 
@@ -423,15 +427,16 @@ usage(char* prog_name, size_t exit_code) {
 int
 main(int argc, char* argv[]) {
 
-   if (argc != 3) {
+   if ((argc < 3) || (argc > 4)) {
       usage(argv[0], 1);
    }
    char*             prog_name   = argv[0];
-   char*             ip_addr     = argv[1];
+   char*             host_ip     = argv[1];
    unsigned long int test_number = strtoul(argv[2], NULL, 10);
+   char*             proxy_ip    = ((argc > 3) ? argv[3] : NULL);
 
    IOBuf* b = aws_iobuf_new();
-   s3_connect(ip_addr);
+   s3_connect(host_ip, proxy_ip);
 
    // make sure TEST_BUCKET exists
 	s3_set_bucket(TEST_BUCKET);

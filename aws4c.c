@@ -65,12 +65,22 @@ static int    useRrs = 0;  /// <Use reduced redundancy storage
 static char * ID       = NULL;  /// <Current ID
 static char * awsKeyID = NULL;  /// <AWS Key ID
 static char * awsKey   = NULL;  /// <AWS Key Material
-static char * S3Host     = "s3.amazonaws.com";     /// <AWS S3 host
+static char * S3Host   = "s3.amazonaws.com";     /// <AWS S3 host
 /// \todo Use SQSHost in SQS functions
 static char * SQSHost  = "queue.amazonaws.com";  /// <AWS SQS host
+static char * S3Proxy  = NULL;
 static char * Bucket   = NULL;
 static char * MimeType = NULL;
 static char * AccessControl = NULL;
+
+// S3Host and S3Proxy are initially static constants, but will be replaced
+// with dynamically-allocated strings.  This lets us know whether to free,
+// or not.
+typedef enum {
+   S3HOST_STATIC  = 0x01,
+   S3PROXY_STATIC = 0x02
+} AWS4C_FLAGS;
+static int flags = (S3HOST_STATIC | S3PROXY_STATIC);
 
 typedef struct {
    size_t offset;
@@ -303,6 +313,7 @@ static void Dump ()
   printf ( "KeyID  : %-40s \n", awsKeyID );
   printf ( "Key    : %-40s \n", awsKey );
   printf ( "S3  Host   : %-40s \n", S3Host );
+  printf ( "S3  Proxy  : %-40s \n", S3Proxy );
   printf ( "SQS Host   : %-40s \n", SQSHost );
   printf ( "Bucket : %-40s \n", Bucket );
   printf ( "----------------------------------------\n");
@@ -539,6 +550,9 @@ static int SQSRequest ( IOBuf *b, char * verb, char * const url )
   curl_easy_setopt ( ch, CURLOPT_READFUNCTION, readfunc );
   curl_easy_setopt ( ch, CURLOPT_READDATA, b );
 
+  if (S3Proxy)
+     curl_easy_setopt ( ch, CURLOPT_PROXY, S3Proxy);
+
   int  sc  = curl_easy_perform(ch);
   /** \todo check the return code  */
   __debug ( "Return Code: %d ", sc );
@@ -707,7 +721,32 @@ void s3_set_host ( char * const str ) {
       curl_easy_cleanup(ch);
       ch = NULL;
    }
+   if (S3Host && !(flags & S3HOST_STATIC))
+      free(S3Host);
    S3Host = ((str == NULL) ? NULL :  strdup(str));
+   flags &=  ~(S3HOST_STATIC);
+}
+
+/// Set S3 Proxy NOTE: libcurl allows separate specifications of proxy,
+/// proxy_port, and proxy_type, but they aren't necesssary.  You can put
+/// them all into the proxy-name string (e.g. "socks5://xx.xx.xx:port".
+/// Therefore, we only provide a way to set the proxy.
+///
+/// Set to NULL (the default), to stop using a proxy.
+void s3_set_proxy ( char * const str ) {
+
+   if (S3Proxy && str && !strcmp(str, S3Proxy))
+      return;
+
+   assert(!inside);
+   if (ch) {
+      curl_easy_cleanup(ch);
+      ch = NULL;
+   }
+   if (S3Proxy && !(flags & S3PROXY_STATIC))
+      free(S3Proxy);
+   S3Proxy = ((str == NULL) ? NULL :  strdup(str));
+   flags &=  ~(S3PROXY_STATIC);
 }
 
 /// Select current S3 bucket
@@ -957,16 +996,16 @@ s3_do_put_or_post ( IOBuf *read_b, char * const signature,
 
   snprintf ( Buf, sizeof(Buf), "http://%s/%s", S3Host , resource );
 
-
   curl_easy_setopt ( ch, CURLOPT_HTTPHEADER, slist);
   curl_easy_setopt ( ch, CURLOPT_URL, Buf );
-
   curl_easy_setopt ( ch, CURLOPT_HEADERFUNCTION, header );
   curl_easy_setopt ( ch, CURLOPT_HEADERDATA, read_b ); /* keeping original code */
   curl_easy_setopt ( ch, CURLOPT_VERBOSE, debug );
   curl_easy_setopt ( ch, CURLOPT_UPLOAD, 1 );
   curl_easy_setopt ( ch, CURLOPT_FOLLOWLOCATION, 1 );
 
+  if (S3Proxy)
+     curl_easy_setopt ( ch, CURLOPT_PROXY, S3Proxy);
 
   // If caller provided an IOBuf to recv the response from the server,
   // we'll arrange the writefunc to fill it.  Otherwise, if debugging is
@@ -1062,6 +1101,8 @@ s3_do_get ( IOBuf* b, char* const signature,
   curl_easy_setopt ( ch, CURLOPT_HEADERFUNCTION, header );
   curl_easy_setopt ( ch, CURLOPT_HEADERDATA, b );
   curl_easy_setopt ( ch, CURLOPT_VERBOSE, debug );
+  if (S3Proxy)
+     curl_easy_setopt ( ch, CURLOPT_PROXY, S3Proxy);
 
   // maybe turn this into a HEAD request
   curl_easy_setopt ( ch, CURLOPT_NOBODY, head_p );
@@ -1121,6 +1162,9 @@ s3_do_delete ( IOBuf *b, char * const signature,
   curl_easy_setopt ( ch, CURLOPT_HEADERFUNCTION, header );
   curl_easy_setopt ( ch, CURLOPT_HEADERDATA, b );
   curl_easy_setopt ( ch, CURLOPT_VERBOSE, debug );
+
+  if (S3Proxy)
+     curl_easy_setopt ( ch, CURLOPT_PROXY, S3Proxy);
 
   CURLcode sc  = curl_easy_perform(ch);
   /** \todo check the return code  */

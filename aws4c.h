@@ -112,6 +112,7 @@ void aws_set_rrs(int r);
 
 void s3_set_bucket    ( char* const str );
 void s3_set_host      ( char* const str );
+void s3_set_proxy     ( char* const str );
 void s3_set_mime      ( char* const str );
 void s3_set_acl       ( char* const str );
 void s3_set_byte_range( size_t offset, size_t length );
