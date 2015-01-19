@@ -24,3 +24,4 @@ sqs_example
 *.gcda
 
 /vera.xml
+.idea
