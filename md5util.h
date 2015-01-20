@@ -1,0 +1,1 @@
+int verifyMD5(char * filename, char * md5sum);

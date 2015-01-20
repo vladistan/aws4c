@@ -182,9 +182,9 @@ static size_t writedummyfunc ( void * ptr, size_t size, size_t nmemb, void * str
 /// \return number of bytes written
 static size_t readfunc ( void * ptr, size_t size, size_t nmemb, void * stream )
 {
-  char * Ln = ptr;
-  int sz = aws_iobuf_getline ( stream, ptr, size*nmemb);
-  __debug ( "Sent[%3d] %s", sz, Ln );
+  //char * Ln = ptr;
+  int sz = aws_iobuf_getdata ( stream, ptr, size*nmemb);
+  __debug ( "Sent[%3d] %s", sz, ptr );
   return sz;
 }
 
@@ -335,14 +335,12 @@ static char * GetStringToSign ( char * resource,  int resSize,
   /// \todo Change the way RRS is handled.  Need to pass it in
   
   * date = __aws_get_httpdate();
-
+  
   memset ( resource,0,resSize);
-  if ( bucket != NULL )
-    snprintf ( resource, resSize,"%s/%s", bucket, file );
-  else
-    snprintf ( resource, resSize,"%s", file );
 
-  if (AccessControl)
+  snprintf ( resource, resSize,"%s", file );
+
+  if (AccessControl )
     snprintf( acl, sizeof(acl), "x-amz-acl:%s\n", AccessControl);
   else
     acl[0] = 0;
@@ -352,15 +350,33 @@ static char * GetStringToSign ( char * resource,  int resSize,
   else
     rrs[0] = 0;
 
-
-  snprintf ( reqToSign, sizeof(reqToSign),"%s\n\n%s\n%s\n%s%s/%s",
-	     method,
-	     MimeType ? MimeType : "",
-	     *date,
-	     acl,
-	     rrs,
-	     resource );
-
+  if( strcmp(method, "DELETE") == 0 ) {
+    snprintf ( reqToSign, sizeof(reqToSign),"%s\n\n%s\n%s\n/%s/%s",
+               method,
+               MimeType ? MimeType : "",
+               *date,
+               bucket,
+               resource );
+  }
+  else if( strcmp(method, "PUT") == 0 ) {
+    snprintf ( reqToSign, sizeof(reqToSign),"%s\n\n%s\n%s\n%s%s/%s/%s",
+               method,
+               MimeType ? MimeType : "",
+               *date,
+               acl,
+               rrs,
+               bucket,
+               resource );
+  }
+  else if( strcmp(method, "GET") == 0 ) {
+    snprintf ( reqToSign, sizeof(reqToSign),"%s\n\n%s\n%s\n/%s/%s",
+               method,
+               MimeType ? MimeType : "",
+               *date,
+               bucket,
+               resource );
+  }
+  
   // EU: If bucket is in virtual host name, remove bucket from path
   if (bucket && strncmp(S3Host, bucket, strlen(bucket)) == 0)
     snprintf ( resource, resSize,"%s", file );
@@ -445,6 +461,19 @@ static char * SQSSign ( char * str )
 
 /// Initialize  the library 
 void aws_init () { curl_global_init (CURL_GLOBAL_ALL); }
+
+/// De-initialize the library 
+/// Not thread safe. Call only before last use of the library
+void aws_deinit () { 
+	if ( ID != NULL ) free ( ID );
+	if ( awsKey != NULL ) free ( awsKey );
+	if ( awsKeyID != NULL ) free ( awsKeyID );
+	if ( S3Host != NULL ) free ( S3Host );
+	if ( Bucket != NULL ) free ( Bucket );
+	if ( MimeType != NULL ) free ( MimeType );
+	if ( AccessControl != NULL ) free ( AccessControl );
+	curl_global_cleanup();
+}
 
 /// Set debuging output
 /// \param d  when non-zero causes debugging output to be printed
@@ -648,13 +677,14 @@ static int s3_do_put ( IOBuf *b, char * const signature,
     slist = curl_slist_append(slist, Buf );  }
 
 
-
+  snprintf ( Buf, sizeof(Buf), "Accept:" );
+  slist = curl_slist_append(slist, Buf );
   snprintf ( Buf, sizeof(Buf), "Date: %s", date );
   slist = curl_slist_append(slist, Buf );
   snprintf ( Buf, sizeof(Buf), "Authorization: AWS %s:%s", awsKeyID, signature );
   slist = curl_slist_append(slist, Buf );
 
-  snprintf ( Buf, sizeof(Buf), "http://%s/%s", S3Host , resource );
+  snprintf ( Buf, sizeof(Buf), "http://%s.%s/%s", Bucket, S3Host , resource );
 
   curl_easy_setopt ( ch, CURLOPT_HTTPHEADER, slist);
   curl_easy_setopt ( ch, CURLOPT_URL, Buf );
@@ -688,16 +718,16 @@ static int s3_do_get ( IOBuf *b, char * const signature,
 
   CURL* ch =  curl_easy_init( );
   struct curl_slist *slist=NULL;
-
-  slist = curl_slist_append(slist, "If-Modified-Since: Tue, 26 May 2009 18:58:55 GMT" );
-  slist = curl_slist_append(slist, "ETag: \"6ea58533db38eca2c2cc204b7550aab6\"");
+  
+  snprintf ( Buf, sizeof(Buf), "Accept:" );
+  slist = curl_slist_append(slist, Buf );
 
   snprintf ( Buf, sizeof(Buf), "Date: %s", date );
   slist = curl_slist_append(slist, Buf );
   snprintf ( Buf, sizeof(Buf), "Authorization: AWS %s:%s", awsKeyID, signature );
   slist = curl_slist_append(slist, Buf );
 
-  snprintf ( Buf, sizeof(Buf), "http://%s/%s", S3Host, resource );
+  snprintf ( Buf, sizeof(Buf), "http://%s.%s/%s", Bucket, S3Host , resource );
 
   curl_easy_setopt ( ch, CURLOPT_HTTPHEADER, slist);
   curl_easy_setopt ( ch, CURLOPT_URL, Buf );
@@ -726,13 +756,14 @@ static int s3_do_delete ( IOBuf *b, char * const signature,
   CURL* ch =  curl_easy_init( );
   struct curl_slist *slist=NULL;
 
-
+  snprintf ( Buf, sizeof(Buf), "Accept:" );
+  slist = curl_slist_append(slist, Buf );
   snprintf ( Buf, sizeof(Buf), "Date: %s", date );
   slist = curl_slist_append(slist, Buf );
   snprintf ( Buf, sizeof(Buf), "Authorization: AWS %s:%s", awsKeyID, signature );
   slist = curl_slist_append(slist, Buf );
 
-  snprintf ( Buf, sizeof(Buf), "http://%s/%s", S3Host, resource );
+  snprintf ( Buf, sizeof(Buf), "http://%s.%s/%s", Bucket, S3Host , resource );
 
   curl_easy_setopt ( ch, CURLOPT_CUSTOMREQUEST, "DELETE");
   curl_easy_setopt ( ch, CURLOPT_HTTPHEADER, slist);
@@ -878,7 +909,7 @@ int sqs_list_queues ( IOBuf *b, char * const prefix )
       while(-1)
 	{
 	  char Ln[1024];
-	  aws_iobuf_getline ( nb, Ln, sizeof(Ln));
+	  aws_iobuf_getdata ( nb, Ln, sizeof(Ln));
 	  if ( Ln[0] == 0 ) break;
 	  char *q = strstr ( Ln, "<QueueUrl>" );
 	  if ( q != 0 )
@@ -947,7 +978,7 @@ int sqs_get_queueattributes ( IOBuf *b, char * url, int *timeOut, int *nMesg )
   while(-1) 
     {
       char Ln[1024];
-      aws_iobuf_getline ( b, Ln, sizeof(Ln));
+      aws_iobuf_getdata ( b, Ln, sizeof(Ln));
       if ( Ln[0] == 0 ) break;
       
       char *q;
@@ -1102,7 +1133,7 @@ int sqs_get_message ( IOBuf * b, char * const url, char * id  )
       while(-1) 
 	{
 	  char Ln[1024];
-	  aws_iobuf_getline ( bf, Ln, sizeof(Ln));
+	  aws_iobuf_getdata ( bf, Ln, sizeof(Ln));
 	  if ( Ln[0] == 0 ) break;
 
 	  __debug ( "%s|%s|", inBody ? ">>": "", Ln );
@@ -1220,55 +1251,52 @@ void   aws_iobuf_append ( IOBuf *B, char * d, int len )
   IOBufNode * N = malloc(sizeof(IOBufNode));
   N->next = NULL;
   N->buf  = malloc(len+1);
+  N->cur = N->buf;
+  N->nLen = len;
   memcpy(N->buf,d,len);
   N->buf[len] = 0;
   B->len += len;
 
-  if ( B->first == NULL )
+  if ( B->head == NULL )
     {
-      B->first   = N;
+      B->head    = N;
       B->current = N;
+      B->tail    = N;
       B->pos     = N->buf;
     }
   else
     {
-      // Find the last block
-      IOBufNode * D = B->first;
-      while(D->next != NULL ) D = D->next;
+      IOBufNode * D = B->tail;
       D->next = N;
+      B->tail = N;
     }
 }
 
-/// Read the next line from the buffer
+/// Read the next number of bytes
 ///  \param B I/O buffer
-///  \param Line  character array to store the read line in
-///  \param size  size of the character array Line
-///  \return  number of characters read or 0 
-int    aws_iobuf_getline   ( IOBuf * B, char * Line, int size )
-{
-  int ln = 0;
-  memset ( Line, 0, size );
-
-  if ( B->current == NULL ) return 0;
-
-  while ( size - ln > 1 )
-    {
-      if ( *B->pos == '\n' ) { B->pos++; Line[ln] = '\n'; ln++; break; }
-      if ( *B->pos == 0 ) 
-      {
-	B->current = B->current->next;
-	if ( B->current == NULL ) break;
-	B->pos = B->current->buf;
-	continue;
-      }
-      Line[ln] = * B->pos;
-      ln++;
-      
-      B->pos++;
-      // At the end of the block switch again
+///  \param buffer  buffer to store the data in
+///  \param size  size of the buffer to store data
+///  \return  number of bytes read or 0 
+int aws_iobuf_getdata(IOBuf *B, char *buffer, size_t size) {    
+  size_t nRead = 0;
+  size_t nLeft = size;
+  IOBufNode *node = B->current;
+  while (node && nLeft) {
+    if (node->nLen) {
+      size_t nCopy = node->nLen >= nLeft ? nLeft : node->nLen;
+      memcpy(buffer + nRead, node->cur, nCopy);
+      nRead += nCopy;
+      node->cur += nCopy;
+      node->nLen -= nCopy;
+      nLeft -= nCopy;
     }
-  B->len -= ln;
-  return ln;
+    
+    if (nLeft) {
+      node = node->next;
+      B->current = node;
+    }
+  }
+  return nRead;
 }
 
 /// Release IO Buffer
@@ -1276,7 +1304,7 @@ int    aws_iobuf_getline   ( IOBuf * B, char * Line, int size )
 void   aws_iobuf_free ( IOBuf * bf )
 { 
   /// Release Things
-  IOBufNode * N = bf->first;
+  IOBufNode * N = bf->head;
   if ( bf->result  != NULL ) free ( bf->result  );
   if ( bf->lastMod != NULL ) free ( bf->lastMod );
   if ( bf->eTag    != NULL ) free ( bf->eTag    );
@@ -1288,10 +1316,14 @@ void   aws_iobuf_free ( IOBuf * bf )
   while ( N->next != NULL )
     {
       IOBufNode * NN = N->next;
+      if ( N->buf != NULL) free ( N->buf );
       free(N);
       N = NN;
     }
-  if ( N != NULL ) free ( N );
+  if ( N != NULL ) {
+  	if ( N->buf != NULL) free ( N->buf );
+  	free( N );
+  }
 }
 
 /*!

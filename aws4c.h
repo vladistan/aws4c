@@ -18,15 +18,18 @@
 /// IOBuf Node
 typedef struct _IOBufNode
 {
+  size_t nLen;
   char * buf;
+  char * cur;
   struct _IOBufNode * next;
 } IOBufNode;
 
 /// IOBuf structure
 typedef struct IOBuf 
 {
-  IOBufNode * first;
-  IOBufNode * current;
+  IOBufNode * head;    // First node
+  IOBufNode * current;  // Current node
+  IOBufNode * tail;  // Last node
   char   * pos;
 
   char * result;
@@ -41,6 +44,7 @@ typedef struct IOBuf
 
 
 void aws_init ();
+void aws_deinit ();
 void aws_set_id ( char * const str );    
 void aws_set_key ( char * const str );
 void aws_set_keyid ( char * const str );
@@ -68,6 +72,6 @@ int sqs_delete_message ( IOBuf * bf, char * const url, char * receipt );
 
 IOBuf * aws_iobuf_new ();
 void   aws_iobuf_append ( IOBuf *B, char * d, int len );
-int    aws_iobuf_getline   ( IOBuf * B, char * Line, int size );
+int    aws_iobuf_getdata   ( IOBuf * B, char * Line, size_t size );
 void   aws_iobuf_free ( IOBuf * bf );
 

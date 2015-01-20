@@ -55,6 +55,7 @@ int main ( int argc, char * argv[] )
   printf ( "ETAG    [%s] \n", bf->eTag );
 
   aws_iobuf_free ( bf );
-
+  
+  aws_deinit ();
   return 0;
 }

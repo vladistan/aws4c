@@ -48,7 +48,7 @@ void DumpResult ( int rv, IOBuf * bf )
   while(-1)
     {
       char Ln[1024];
-      int sz = aws_iobuf_getline ( bf, Ln, sizeof(Ln));
+      int sz = aws_iobuf_getdata ( bf, Ln, sizeof(Ln));
       if ( Ln[0] == 0 ) break;
       printf ( "S[%3d] %s", sz, Ln );
     }
@@ -106,7 +106,7 @@ int main ( int argc, char * argv[] )
   while(-1)
     {
       char Ln[1024];
-      aws_iobuf_getline ( bf, Ln, sizeof(Ln));
+      aws_iobuf_getdata ( bf, Ln, sizeof(Ln));
       if ( Ln[0] == 0 ) break;
       Ln[strlen(Ln)-1] = 0;
       printf ( "Queue: [%s]\n",  Ln );
@@ -169,5 +169,7 @@ int main ( int argc, char * argv[] )
       else { puts ( "Empty queue" ); break; }
   }
   puts ("\n---");
+  
+  aws_deinit ();
   return 0;
 }
