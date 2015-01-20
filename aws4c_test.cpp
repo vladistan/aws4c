@@ -102,6 +102,20 @@ TEST(IOBuf, IOBufInitializedCorrectly )
    POINTERS_EQUAL(b->current, NULL);
    POINTERS_EQUAL(b->pos, NULL);
 
+}
+
+TEST(IOBuf, IOBufAppendSingleLine )
+{
+    IOBuf * b = aws_iobuf_new();
+
+    aws_iobuf_append(b, "Hello\n",  6 );
+
+    CHECK ( b -> first != NULL );
+    POINTERS_EQUAL ( b-> first,  b-> current );
+    CHECK ( *b -> pos == 'H');
+    CHECK ( b -> current -> buf[6] == 0 );
+    POINTERS_EQUAL ( b-> first -> next , NULL );
+
 
 }
 
