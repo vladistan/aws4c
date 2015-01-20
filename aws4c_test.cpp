@@ -70,6 +70,11 @@ TEST_GROUP(Debug)
 
 };
 
+TEST_GROUP(IOBuf)
+{
+
+};
+
 
 
 
@@ -87,6 +92,18 @@ extern "C" void __chomp ( char  * str );
 extern "C" char *__b64_encode(const unsigned char *input, int length);
 extern "C" void __aws_urlencode ( char * src, char * dest, int nDest );
 extern "C" void __debug ( char *fmt, ... );
+
+
+TEST(IOBuf, IOBufInitializedCorrectly )
+{
+   IOBuf * b = aws_iobuf_new();
+
+   POINTERS_EQUAL(b->first, NULL);
+   POINTERS_EQUAL(b->current, NULL);
+   POINTERS_EQUAL(b->pos, NULL);
+
+
+}
 
 
 TEST(Debug,TestSimple)
