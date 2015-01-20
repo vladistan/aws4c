@@ -25,3 +25,6 @@ sqs_example
 
 /vera.xml
 .idea
+CppUTest
+CppUTestExt
+mocks.o

@@ -22,10 +22,13 @@
 
 #include <CppUTest/CommandLineTestRunner.h>
 #include <CppUTest/JUnitTestOutput.h>
+#include <CppUTestExt/MockSupport.h>
 #include <stdio.h>
 #include <string.h>
+extern "C" {
 #include "aws4c.h"
-
+extern "C" int debug;
+}
 
 TEST_GROUP(ChompTest)
 {
@@ -48,6 +51,27 @@ TEST_GROUP(UrlEncode)
 {
 };
 
+TEST_GROUP(Debug)
+{
+    int saveDebug;
+    void setup()
+    {
+        saveDebug = debug;
+        debug = 1;
+    }
+
+    void teardown()
+    {
+        mock().checkExpectations();
+        mock().removeAllComparators();
+        mock().clear();
+        debug = saveDebug;
+    }
+
+};
+
+
+
 
 TEST(ChompTest, FirstTest)
 {
@@ -62,6 +86,20 @@ extern "C" char * __aws_get_httpdate_t(time_t t);
 extern "C" void __chomp ( char  * str );
 extern "C" char *__b64_encode(const unsigned char *input, int length);
 extern "C" void __aws_urlencode ( char * src, char * dest, int nDest );
+extern "C" void __debug ( char *fmt, ... );
+
+
+TEST(Debug,TestSimple)
+{
+
+    mock().expectOneCall("fprintf").withParameter("stream", stderr).withParameter("fmt", "DBG: ");
+    mock().expectOneCall("vfprintf").withParameter("stream", stderr).withParameter("fmt", "Hello Test %d");
+    mock().expectOneCall("fprintf").withParameter("stream", stderr).withParameter("fmt", "\n");
+
+
+    __debug("Hello Test %d", 19 );
+
+}
 
 TEST(UrlEncode,  UrlEncode_ShouldWorkDoNothingToSimpleString)
 {

@@ -57,7 +57,7 @@
   \{
 */
 
-static int debug = 0;   /// <flag to control debugging options
+STATIC int debug = 0;   /// <flag to control debugging options
 static int useRrs = 0;  /// <Use reduced redundancy storage
 static char * ID       = NULL;  /// <Current ID
 static char * awsKeyID = NULL;  /// <AWS Key ID
@@ -69,7 +69,7 @@ static char * Bucket   = NULL;
 static char * MimeType = NULL;
 static char * AccessControl = NULL;
 
-static void __debug ( char *fmt, ... );
+STATIC void __debug ( char *fmt, ... );
 STATIC char * __aws_get_iso_date_t (time_t t);
 static char * __aws_get_iso_date ();
 STATIC char * __aws_get_httpdate_t (time_t t);
@@ -264,7 +264,7 @@ static void Dump ()
 /// Print debug output
 /// \internal
 /// \param fmt printf like formating string
-static void __debug ( char *fmt, ... ) 
+void __debug ( char *fmt, ... )
 {
   /// If debug flag is not set we won't print anything
   if ( ! debug ) { return; }
