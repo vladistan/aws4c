@@ -159,6 +159,30 @@ TEST(Header, ETag)
 
 }
 
+TEST(Header, LastModified)
+{
+
+    char  inp[] = "Last-Modified: Wed, 21 Jan 2015 22:57:47 GMT\n";
+    IOBuf * b = aws_iobuf_new();
+
+    header(inp, sizeof(inp), 1, b);
+
+    STRCMP_EQUAL( "Wed, 21 Jan 2015 22:57:47 GMT", b -> lastMod  );
+
+}
+
+TEST(Header, ContentLength)
+{
+
+    char  inp[] = "Content-Length: 22233\n";
+    IOBuf * b = aws_iobuf_new();
+
+    header(inp, sizeof(inp), 1, b);
+
+    LONGS_EQUAL ( b -> contentLen, 22233 );
+
+}
+
 TEST(Config, GetCFG)
 {
 
