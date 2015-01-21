@@ -13,6 +13,7 @@ endif
 
 ifeq ($(TEST),Y)
 CFLAGS += -Dfprintf=mock_fprintf -Dvfprintf=mock_fvprintf -Dtime=mock_time -Dcurl_easy_init=mock_curl_easy_init -Dcurl_global_init=mock_curl_global_init -DTESTING=1 -I.
+CFLAGS += -DGetEnv=mock_getenv
 CXXFLAGS += $(CFLAGS)
 endif
 

@@ -74,7 +74,7 @@ STATIC char * __aws_get_iso_date_t (time_t t);
 STATIC char * __aws_get_iso_date ();
 STATIC char * __aws_get_httpdate_t (time_t t);
 STATIC char * __aws_get_httpdate ();
-static FILE * __aws_getcfg ();
+STATIC FILE * __aws_getcfg ();
 static int s3_do_get ( IOBuf *b, char * const signature, 
 			  char * const date, char * const resource );
 static int s3_do_put ( IOBuf *b, char * const signature, 
@@ -298,13 +298,13 @@ STATIC char * __aws_get_httpdate()
 }
 
 /// Internal function to get configuration file
-static FILE * __aws_getcfg ()
+STATIC FILE * __aws_getcfg ()
 {
   int rv;
   char ConfigFile[256];
   /// Compose FileName and check
   snprintf ( ConfigFile, sizeof(ConfigFile) - 3, "%s/.awsAuth",
-	     getenv("HOME"));
+	     GetEnv("HOME"));
   __debug ( "Config File %s", ConfigFile );
 
   struct stat sBuf;

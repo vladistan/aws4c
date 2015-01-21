@@ -50,3 +50,10 @@ CURLcode curl_global_init(long flags)
             .withParameter("flags", (int)flags);
     return CURLE_OK;
 }
+
+
+char * TEST_HOME="./test_data/";
+extern "C" char * GetEnv(const char *name)
+{
+    return TEST_HOME;
+}

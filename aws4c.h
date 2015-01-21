@@ -73,8 +73,10 @@ void   aws_iobuf_free ( IOBuf * bf );
 
 /* Make internal functions non-static when doing unit tests */
 #ifdef TESTING
-#define STATIC 
+#define STATIC
+char * GetEnv(const char *name);
 #else
 #define STATIC static
+#define GetEnv getenv
 #endif
 

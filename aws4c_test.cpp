@@ -77,6 +77,12 @@ TEST_GROUP(IOBuf)
 };
 
 
+TEST_GROUP(Config)
+{
+
+};
+
+
 TEST_GROUP(Init)
 {
         void setup()
@@ -120,6 +126,18 @@ extern "C" void __aws_urlencode ( char * src, char * dest, int nDest );
 extern "C" void __debug ( char *fmt, ... );
 extern "C" char * __aws_get_iso_date ();
 extern "C" char * __aws_get_httpdate ();
+extern "C" FILE * __aws_getcfg ();
+
+
+TEST(Config, GetCFG)
+{
+
+    FILE * cfgFile = __aws_getcfg();
+
+    CHECK( cfgFile != NULL );
+
+
+}
 
 
 
