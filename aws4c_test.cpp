@@ -145,7 +145,17 @@ TEST(Header, ResultCode)
 
     STRCMP_EQUAL( "301 Moved Permanently", b -> result  );
     LONGS_EQUAL ( b -> code, 301 );
+}
 
+TEST(Header, ETag)
+{
+
+    char  inp[] = "ETag: 2334022299449";
+    IOBuf * b = aws_iobuf_new();
+
+    header(inp, sizeof(inp), 1, b);
+
+    STRCMP_EQUAL( "2334022299449", b -> eTag  );
 
 }
 
