@@ -196,7 +196,7 @@ static size_t readfunc ( void * ptr, size_t size, size_t nmemb, void * stream )
 /// \param nmemb number of data memebers
 /// \param stream pointer to I/O buffer
 /// \return number of bytes processed
-static size_t header ( void * ptr, size_t size, size_t nmemb, void * stream )
+STATIC size_t header ( void * ptr, size_t size, size_t nmemb, void * stream )
 {
   IOBuf * b = stream;
 

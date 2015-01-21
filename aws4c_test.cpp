@@ -82,6 +82,11 @@ TEST_GROUP(Config)
 
 };
 
+TEST_GROUP(Header)
+{
+
+};
+
 
 TEST_GROUP(Init)
 {
@@ -127,7 +132,22 @@ extern "C" void __debug ( char *fmt, ... );
 extern "C" char * __aws_get_iso_date ();
 extern "C" char * __aws_get_httpdate ();
 extern "C" FILE * __aws_getcfg ();
+extern "C" size_t header ( void * ptr, size_t size, size_t nmemb, void * stream );
 
+
+TEST(Header, ResultCode)
+{
+
+    char  inp[] = "HTTP/1.1 301 Moved Permanently";
+    IOBuf * b = aws_iobuf_new();
+
+    header(inp, sizeof(inp), 1, b);
+
+    STRCMP_EQUAL( "301 Moved Permanently", b -> result  );
+    LONGS_EQUAL ( b -> code, 301 );
+
+
+}
 
 TEST(Config, GetCFG)
 {
@@ -138,6 +158,7 @@ TEST(Config, GetCFG)
 
 
 }
+
 
 
 
