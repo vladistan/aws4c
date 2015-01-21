@@ -148,7 +148,20 @@ TEST(IOBuf, IOBufReadSingleLine )
 
     STRCMP_EQUAL( Str, "Hello\n"  );
 
+}
 
+TEST(IOBuf, IOBufReadSingleLineFromTwoBlocks )
+{
+    IOBuf * b = aws_iobuf_new();
+
+    aws_iobuf_append(b, "Hello",  6 );
+    aws_iobuf_append(b, "World\n22",  6 );
+
+    char Str[90];
+
+    aws_iobuf_getline(b, Str, 90 );
+
+    STRCMP_EQUAL( Str, "HelloWorld\n"  );
 
 }
 
