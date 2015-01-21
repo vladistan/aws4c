@@ -135,6 +135,24 @@ TEST(IOBuf, IOBufAppendTwoLines )
 }
 
 
+TEST(IOBuf, IOBufReadSingleLine )
+{
+    IOBuf * b = aws_iobuf_new();
+
+    aws_iobuf_append(b, "Hello\n",  6 );
+    aws_iobuf_append(b, "World\n",  6 );
+
+    char Str[90];
+
+    aws_iobuf_getline(b, Str, 90 );
+
+    STRCMP_EQUAL( Str, "Hello\n"  );
+
+
+
+}
+
+
 TEST(Debug,TestSimple)
 {
 
