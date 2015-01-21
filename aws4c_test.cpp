@@ -25,6 +25,7 @@
 #include <CppUTestExt/MockSupport.h>
 #include <stdio.h>
 #include <string.h>
+#include <curl/curl.h>
 extern "C" {
 #include "aws4c.h"
 extern "C" int debug;
@@ -75,6 +76,31 @@ TEST_GROUP(IOBuf)
 
 };
 
+
+TEST_GROUP(Init)
+{
+        void setup()
+        {
+            debug = 1;
+        }
+
+        void teardown()
+        {
+            mock().checkExpectations();
+            mock().removeAllComparators();
+            mock().clear();
+        }
+};
+
+
+TEST(Init, Init)
+{
+
+    mock().expectOneCall("curl_init").withIntParameter("flags", CURL_GLOBAL_ALL);
+
+    aws_init();
+
+}
 
 
 
