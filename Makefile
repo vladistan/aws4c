@@ -12,7 +12,7 @@ endif
 
 
 ifeq ($(TEST),Y)
-CFLAGS += -Dfprintf=mock_fprintf -Dvfprintf=mock_fvprintf -DTESTING=1 -I.
+CFLAGS += -Dfprintf=mock_fprintf -Dvfprintf=mock_fvprintf -Dtime=mock_time -DTESTING=1 -I.
 CXXFLAGS += $(CFLAGS)
 endif
 

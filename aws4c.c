@@ -71,7 +71,7 @@ static char * AccessControl = NULL;
 
 STATIC void __debug ( char *fmt, ... );
 STATIC char * __aws_get_iso_date_t (time_t t);
-static char * __aws_get_iso_date ();
+STATIC char * __aws_get_iso_date ();
 STATIC char * __aws_get_httpdate_t (time_t t);
 STATIC char * __aws_get_httpdate ();
 static FILE * __aws_getcfg ();

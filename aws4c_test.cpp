@@ -92,6 +92,8 @@ extern "C" void __chomp ( char  * str );
 extern "C" char *__b64_encode(const unsigned char *input, int length);
 extern "C" void __aws_urlencode ( char * src, char * dest, int nDest );
 extern "C" void __debug ( char *fmt, ... );
+extern "C" char * __aws_get_iso_date ();
+
 
 
 TEST(IOBuf, IOBufInitializedCorrectly )
@@ -290,6 +292,13 @@ TEST(IsoDate, IsoDateReturnsCorrectDate)
 {
    char * testStr = __aws_get_iso_date_t(1312345678);
    STRCMP_EQUAL("2011-08-03T04:27:58Z", testStr);
+}
+
+
+TEST(IsoDate, IsoDateReturnsCorrectDateUsingMock )
+{
+    char * testStr = __aws_get_iso_date();
+    STRCMP_EQUAL("2011-08-03T04:27:58Z", testStr);
 }
 
 

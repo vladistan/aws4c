@@ -27,3 +27,10 @@ extern "C" int vfprintf(FILE * __restrict out, const char * __restrict fmt , va_
 
     return 1;
 }
+
+extern "C" time_t time(time_t *tloc)
+{
+
+    return 1312345678;
+
+}
