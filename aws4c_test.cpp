@@ -119,6 +119,7 @@ extern "C" char *__b64_encode(const unsigned char *input, int length);
 extern "C" void __aws_urlencode ( char * src, char * dest, int nDest );
 extern "C" void __debug ( char *fmt, ... );
 extern "C" char * __aws_get_iso_date ();
+extern "C" char * __aws_get_httpdate ();
 
 
 
@@ -333,6 +334,14 @@ TEST(HttpDate, HttpDateReturnsCorrectDate)
    char * testStr = __aws_get_httpdate_t(1312345678);
    STRCMP_EQUAL("Wed, 03 Aug 2011 04:27:58 +0000", testStr);
 }
+
+TEST(HttpDate, HttpDateReturnsCorrectDate2)
+{
+    char * testStr = __aws_get_httpdate();
+    STRCMP_EQUAL("Wed, 03 Aug 2011 04:27:58 +0000", testStr);
+}
+
+
 
 
 int main(int ac, char** av)
