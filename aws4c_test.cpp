@@ -139,7 +139,7 @@ extern "C" char * __aws_get_httpdate ();
 extern "C" FILE * __aws_getcfg ();
 extern "C" size_t header ( void * ptr, size_t size, size_t nmemb, void * stream );
 extern "C" char* __aws_sign ( char * const str );
-
+extern "C" char * GetStringToSign ( char * resource,  int resSize, char ** date,  char * const method, char * const bucket, char * const file );
 
 
 TEST(AwsSign, SimpleSign)
@@ -153,6 +153,67 @@ TEST(AwsSign, SimpleSign)
     STRCMP_EQUAL( "MGZZI0fWK24JzbB7JRfFh6oDtPI=", sign  );
 
 }
+
+TEST(AwsSign, GetStringToSign)
+{
+
+    char * sign;
+
+    char  resource [1024];
+    char * date = NULL;
+
+    aws_set_key("AAAABBBCCCCDDDD");
+    sign = GetStringToSign(resource, sizeof(resource), &date, "GET", "mybucket", "myFile.tgz");
+
+    STRCMP_EQUAL( "urB1lRwU2p0j0MWZIEzRIcFDFy0=", sign  );
+    STRCMP_EQUAL( "Wed, 03 Aug 2011 04:27:58 +0000", date  );
+    STRCMP_EQUAL( "mybucket/myFile.tgz", resource  );
+
+}
+
+
+TEST(AwsSign, GetStringToSignWithACL)
+{
+
+    char * sign;
+
+    char  resource [1024];
+    char * date = NULL;
+
+    aws_set_key("AAAABBBCCCCDDDD");
+    s3_set_acl("ACL_1");
+    sign = GetStringToSign(resource, sizeof(resource),&date,"GET","mybucket","myFile.tgz");
+
+    STRCMP_EQUAL( "8AsjYPW+6FR8DzefCTK/yr35poY=", sign  );
+    STRCMP_EQUAL( "Wed, 03 Aug 2011 04:27:58 +0000", date  );
+    STRCMP_EQUAL( "mybucket/myFile.tgz", resource  );
+
+    s3_set_acl(NULL);
+
+}
+
+
+TEST(AwsSign, GetStringToSignWithMime)
+{
+
+    char * sign;
+
+    char  resource [1024];
+    char * date = NULL;
+
+    aws_set_key("AAAABBBCCCCDDDD");
+    s3_set_mime("image/png");
+    sign = GetStringToSign(resource, sizeof(resource),&date,"GET","mybucket","myFile.tgz");
+
+    STRCMP_EQUAL( "kyXV98Mnu20Jf+6kHppC1sX5oDI=", sign  );
+    STRCMP_EQUAL( "Wed, 03 Aug 2011 04:27:58 +0000", date  );
+    STRCMP_EQUAL( "mybucket/myFile.tgz", resource  );
+
+    s3_set_mime(NULL);
+
+}
+
+
 
 TEST(Header, ResultCode)
 {

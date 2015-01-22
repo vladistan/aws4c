@@ -335,7 +335,7 @@ STATIC FILE * __aws_getcfg ()
 /// \param file --  file
 /// \return fills up resource and date parameters, also 
 ///         returns request signature to be used with Authorization header
-static char * GetStringToSign ( char * resource,  int resSize, 
+STATIC char * GetStringToSign ( char * resource,  int resSize,
 			     char ** date,
 			     char * const method,
 			     char * const bucket,
