@@ -81,7 +81,7 @@ static int s3_do_put ( IOBuf *b, char * const signature,
 			  char * const date, char * const resource );
 static int s3_do_delete ( IOBuf *b, char * const signature, 
 			  char * const date, char * const resource );
-static char* __aws_sign ( char * const str );
+STATIC char* __aws_sign ( char * const str );
 STATIC void __chomp ( char  * str );
 
 #ifdef ENABLE_UNBASE64
@@ -757,7 +757,7 @@ static int s3_do_delete ( IOBuf *b, char * const signature,
 
 }
 
-static char* __aws_sign ( char * const str )
+STATIC char* __aws_sign ( char * const str )
 {
   HMAC_CTX ctx;
   unsigned char MD[256];

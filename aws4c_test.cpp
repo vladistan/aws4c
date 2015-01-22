@@ -88,6 +88,11 @@ TEST_GROUP(Header)
 };
 
 
+TEST_GROUP(AwsSign)
+{
+
+};
+
 TEST_GROUP(Init)
 {
         void setup()
@@ -133,7 +138,21 @@ extern "C" char * __aws_get_iso_date ();
 extern "C" char * __aws_get_httpdate ();
 extern "C" FILE * __aws_getcfg ();
 extern "C" size_t header ( void * ptr, size_t size, size_t nmemb, void * stream );
+extern "C" char* __aws_sign ( char * const str );
 
+
+
+TEST(AwsSign, SimpleSign)
+{
+
+    char * sign;
+
+    aws_set_key("AAAABBBCCCCDDDD");
+    sign = __aws_sign("Test String");
+
+    STRCMP_EQUAL( "MGZZI0fWK24JzbB7JRfFh6oDtPI=", sign  );
+
+}
 
 TEST(Header, ResultCode)
 {
