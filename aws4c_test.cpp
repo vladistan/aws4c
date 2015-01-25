@@ -91,6 +91,33 @@ TEST_GROUP(Header)
 TEST_GROUP(AwsSign)
 {
 
+        void setup()
+        {
+            aws_set_key("AAAABBBCCCCDDDD");
+        }
+
+        void teardown()
+        {
+            mock().checkExpectations();
+            mock().removeAllComparators();
+            mock().clear();
+            aws_set_key(NULL);
+        }
+};
+
+
+TEST_GROUP(SqsSign)
+{
+        void setup()
+        {
+            aws_set_key("AAAABBBCCCCDDDD");
+        }
+
+        void teardown()
+        {
+            aws_set_key(NULL);
+        }
+
 };
 
 TEST_GROUP(SQSRequest)
@@ -159,13 +186,14 @@ extern "C" size_t readfunc ( void * ptr, size_t size, size_t nmemb, void * strea
 extern "C" char* __aws_sign ( char * const str );
 extern "C" char * GetStringToSign ( char * resource,  int resSize, char ** date,  char * const method, char * const bucket, char * const file );
 extern "C" int SQSRequest ( IOBuf *b, char * verb, char * const url );
+extern "C" char * SQSSign ( char * str );
 
 TEST(AwsSign, SimpleSign)
 {
 
     char * sign;
 
-    aws_set_key("AAAABBBCCCCDDDD");
+
     sign = __aws_sign("Test String");
 
     STRCMP_EQUAL( "MGZZI0fWK24JzbB7JRfFh6oDtPI=", sign  );
@@ -180,7 +208,6 @@ TEST(AwsSign, GetStringToSign)
     char  resource [1024];
     char * date = NULL;
 
-    aws_set_key("AAAABBBCCCCDDDD");
     sign = GetStringToSign(resource, sizeof(resource), &date, "GET", "mybucket", "myFile.tgz");
 
     STRCMP_EQUAL( "urB1lRwU2p0j0MWZIEzRIcFDFy0=", sign  );
@@ -198,7 +225,6 @@ TEST(AwsSign, GetStringToSignWithACL)
     char  resource [1024];
     char * date = NULL;
 
-    aws_set_key("AAAABBBCCCCDDDD");
     s3_set_acl("ACL_1");
     sign = GetStringToSign(resource, sizeof(resource),&date,"GET","mybucket","myFile.tgz");
 
@@ -219,7 +245,6 @@ TEST(AwsSign, GetStringToSignWithMime)
     char  resource [1024];
     char * date = NULL;
 
-    aws_set_key("AAAABBBCCCCDDDD");
     s3_set_mime("image/png");
     sign = GetStringToSign(resource, sizeof(resource),&date,"GET","mybucket","myFile.tgz");
 
@@ -434,6 +459,15 @@ TEST(SQSRequest, Simple)
     SQSRequest(bf,"POST", (char * const) url);
 
 
+
+}
+
+
+TEST(SqsSign, Simple)
+{
+    char * rv =   SQSSign("Bob the operator");
+
+    STRCMP_EQUAL("3EjYzPkAdleCOKOgCv%2Fzsq1FuG8%3D", rv);
 
 }
 

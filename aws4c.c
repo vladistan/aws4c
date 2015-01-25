@@ -433,7 +433,7 @@ STATIC int SQSRequest ( IOBuf *b, char * verb, char * const url )
   return sc;
 }
 
-static char * SQSSign ( char * str )
+STATIC char * SQSSign ( char * str )
 {
   char RealSign[1024];
   char * signature = __aws_sign(str);
