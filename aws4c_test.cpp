@@ -93,6 +93,21 @@ TEST_GROUP(AwsSign)
 
 };
 
+TEST_GROUP(SQSRequest)
+{
+        void setup()
+        {
+        }
+
+        void teardown()
+        {
+            mock().checkExpectations();
+            mock().removeAllComparators();
+            mock().clear();
+        }
+
+};
+
 TEST_GROUP(Init)
 {
         void setup()
@@ -107,6 +122,7 @@ TEST_GROUP(Init)
             mock().clear();
         }
 };
+
 
 
 TEST(Init, Init)
@@ -138,9 +154,11 @@ extern "C" char * __aws_get_iso_date ();
 extern "C" char * __aws_get_httpdate ();
 extern "C" FILE * __aws_getcfg ();
 extern "C" size_t header ( void * ptr, size_t size, size_t nmemb, void * stream );
+extern "C" size_t writefunc ( void * ptr, size_t size, size_t nmemb, void * stream );
+extern "C" size_t readfunc ( void * ptr, size_t size, size_t nmemb, void * stream );
 extern "C" char* __aws_sign ( char * const str );
 extern "C" char * GetStringToSign ( char * resource,  int resSize, char ** date,  char * const method, char * const bucket, char * const file );
-
+extern "C" int SQSRequest ( IOBuf *b, char * verb, char * const url );
 
 TEST(AwsSign, SimpleSign)
 {
@@ -344,6 +362,78 @@ TEST(IOBuf, IOBufReadSingleLineFromTwoBlocks )
     aws_iobuf_getline(b, Str, 90 );
 
     STRCMP_EQUAL( Str, "HelloWorld\n"  );
+
+}
+
+
+TEST(SQSRequest, Simple)
+{
+
+    IOBuf * bf = aws_iobuf_new();
+    aws_iobuf_append(bf, "Hello\n",  6 );
+
+    const void * url = "http://bob";
+
+    mock().expectOneCall("curl_easy_init");
+    mock().expectOneCall("curl_easy_setopt").withParameter("curl", (void*)NULL)
+                                            .withParameter("option", CURLOPT_URL)
+                                            .withParameter("arg", url);
+
+    mock().expectOneCall("curl_easy_setopt").withParameter("curl", (void*)NULL)
+                                            .withParameter("option", CURLOPT_HEADERDATA)
+                                            .withParameter("arg", (const void *) bf);
+
+    mock().expectOneCall("curl_easy_setopt").withParameter("curl", (void*)NULL)
+                                            .withParameter("option", CURLOPT_VERBOSE)
+                                            .withParameter("arg", (const void *) 0);
+
+
+    mock().expectOneCall("curl_easy_setopt").withParameter("curl", (void*)NULL)
+                                            .withParameter("option", CURLOPT_INFILESIZE)
+                                            .withParameter("arg", (const void *) 6);
+
+
+
+    mock().expectOneCall("curl_easy_setopt").withParameter("curl", (void*)NULL)
+                                            .withParameter("option", CURLOPT_POST)
+                                            .withParameter("arg", (const void *) 1);
+
+    mock().expectOneCall("curl_easy_setopt").withParameter("curl", (void*)NULL)
+                                            .withParameter("option", CURLOPT_POSTFIELDSIZE)
+                                            .withParameter("arg", (const void *) 0);
+
+    mock().expectOneCall("curl_easy_setopt").withParameter("curl", (void*)NULL)
+                                            .withParameter("option", CURLOPT_HEADERFUNCTION)
+                                            .withParameter("arg", (const void *) header);
+
+
+    mock().expectOneCall("curl_easy_setopt").withParameter("curl", (void*)NULL)
+                                            .withParameter("option", CURLOPT_WRITEFUNCTION)
+                                            .withParameter("arg", (const void *) writefunc);
+
+
+    mock().expectOneCall("curl_easy_setopt").withParameter("curl", (void*)NULL)
+                                            .withParameter("option", CURLOPT_WRITEDATA)
+                                            .withParameter("arg", (const void *) bf);
+
+
+    mock().expectOneCall("curl_easy_setopt").withParameter("curl", (void*)NULL)
+                                            .withParameter("option", CURLOPT_READFUNCTION)
+                                            .withParameter("arg", (const void *) readfunc);
+
+
+    mock().expectOneCall("curl_easy_setopt").withParameter("curl", (void*)NULL)
+                                            .withParameter("option", CURLOPT_READDATA)
+                                            .withParameter("arg", (const void *) bf);
+
+
+    mock().expectOneCall("curl_easy_perform").withParameter("curl", (void*)NULL);
+
+    mock().expectOneCall("curl_slist_free_all").withParameter("list", (void*)NULL);
+
+    SQSRequest(bf,"POST", (char * const) url);
+
+
 
 }
 

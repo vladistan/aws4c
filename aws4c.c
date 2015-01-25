@@ -163,7 +163,7 @@ STATIC void __chomp ( char  * str )
 /// \param nmemb number of data memebers
 /// \param stream pointer to I/O buffer
 /// \return number of bytes processed
-static size_t writefunc ( void * ptr, size_t size, size_t nmemb, void * stream )
+STATIC size_t writefunc ( void * ptr, size_t size, size_t nmemb, void * stream )
 {
   __debug ( "DATA RCVD %d items of size %d ",  nmemb, size );
   aws_iobuf_append ( stream, ptr, nmemb*size );
@@ -182,7 +182,7 @@ static size_t writedummyfunc ( void * ptr, size_t size, size_t nmemb, void * str
 /// \param nmemb number of data memebers
 /// \param stream pointer to I/O buffer
 /// \return number of bytes written
-static size_t readfunc ( void * ptr, size_t size, size_t nmemb, void * stream )
+STATIC size_t readfunc ( void * ptr, size_t size, size_t nmemb, void * stream )
 {
   char * Ln = ptr;
   int sz = aws_iobuf_getline ( stream, ptr, size*nmemb);
@@ -407,7 +407,7 @@ STATIC void __aws_urlencode ( char * src, char * dest, int nDest )
   __debug ( "Encoded To: %s", dest );
 }
 
-static int SQSRequest ( IOBuf *b, char * verb, char * const url )
+STATIC int SQSRequest ( IOBuf *b, char * verb, char * const url )
 {
   CURL* ch =  curl_easy_init( );
   struct curl_slist *slist=NULL;

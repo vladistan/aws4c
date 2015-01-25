@@ -57,3 +57,39 @@ extern "C" char * GetEnv(const char *name)
 {
     return TEST_HOME;
 }
+
+
+extern "C" CURLcode curl_easy_setopt(CURL *curl, CURLoption option, ...)
+{
+    va_list vl;
+    va_start(vl,option);
+
+    void * arg = va_arg(vl, void*);
+
+    mock().actualCall("curl_easy_setopt")
+            .withParameter("curl", (void*)curl)
+            .withParameter("option", option)
+            .withParameter("arg", (const void *)arg);
+
+
+    va_end(vl);
+
+    return CURLE_OK;
+}
+
+extern "C" CURLcode curl_easy_perform(CURL *handle)
+{
+    mock().actualCall("curl_easy_perform")
+            .withParameter("curl", (void*)handle);
+
+    return CURLE_OK;
+
+}
+
+
+extern "C" void curl_slist_free_all(struct curl_slist *list)
+{
+    mock().actualCall("curl_slist_free_all")
+            .withParameter("list", (void*)list);
+
+}
