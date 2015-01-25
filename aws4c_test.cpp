@@ -28,8 +28,13 @@
 #include <curl/curl.h>
 extern "C" {
 #include "aws4c.h"
-extern "C" int debug;
 }
+
+extern "C" int debug;
+extern "C"  char * ID       ;
+extern "C"  char * awsKeyID ;
+extern "C"  char * awsKey   ;
+
 
 TEST_GROUP(ChompTest)
 {
@@ -314,6 +319,19 @@ TEST(Config, GetCFG)
     CHECK( cfgFile != NULL );
 
 
+}
+
+TEST(Config, ReadCfgSimple)
+{
+
+    int rv = aws_read_config("def");
+
+
+
+    LONGS_EQUAL ( 0, rv );
+    STRCMP_EQUAL( ID, "def"  );
+    STRCMP_EQUAL( awsKeyID, "DXEXFXIXID"  );
+    STRCMP_EQUAL( awsKey, "DDEFDDKEYD"  );
 }
 
 

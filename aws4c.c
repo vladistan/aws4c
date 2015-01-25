@@ -59,9 +59,9 @@
 
 STATIC int debug = 0;   /// <flag to control debugging options
 static int useRrs = 0;  /// <Use reduced redundancy storage
-static char * ID       = NULL;  /// <Current ID
-static char * awsKeyID = NULL;  /// <AWS Key ID
-static char * awsKey   = NULL;  /// <AWS Key Material
+STATIC char * ID       = NULL;  /// <Current ID
+STATIC char * awsKeyID = NULL;  /// <AWS Key ID
+STATIC char * awsKey   = NULL;  /// <AWS Key Material
 static char * S3Host     = "s3.amazonaws.com";     /// <AWS S3 host
 /// \todo Use SQSHost in SQS functions
 static char * SQSHost  = "queue.amazonaws.com";  /// <AWS SQS host
