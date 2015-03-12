@@ -1,6 +1,10 @@
 #ifndef  __AWS4C_EXTRA__
 #define  __AWS4C_EXTRA__
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 
 #include "aws4c.h"
 
@@ -33,11 +37,21 @@ void debug_iobuf_node_list(IOBufNode* n, int show_contents);
 void debug_iobuf(IOBuf* b, int nodes_too, int node_contents_too);
 
 void        print_element_names(xmlNode* n);
-const char* find_element_of_type(xmlNode* n, xmlElementType type);
-const char* find_element_named(xmlNode* n, char* name);
+
+xmlNode*    find_xml_element_of_type(xmlNode* n, xmlElementType type);
+const char* find_element_of_type    (xmlNode* n, xmlElementType type);
+
+xmlNode*    find_xml_element_named(xmlNode* n, const char* name);
+const char* find_element_named    (xmlNode* n, const char* name);
+
 void        parse_elements_named(xmlNode* n, char* name, IOBuf* results);
 void        parse_XML_components(const char* field_name, IOBuf* results);
 
 
+
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif

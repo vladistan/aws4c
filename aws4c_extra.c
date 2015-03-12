@@ -170,19 +170,27 @@ print_element_names(xmlNode* n) {
    }
 }
 
-// Return text-contents of first node with name matching <name>
-const char*
-find_element_of_type(xmlNode* n, xmlElementType type) {
+
+
+
+
+
+
+
+
+// find the first XML element (depth-first) with type <type>
+xmlNode*
+find_xml_element_of_type(xmlNode* n, xmlElementType type) {
 
    xmlNode* cur_node = NULL;
-   for (cur_node = n; cur_node; cur_node = cur_node->next) {
+   for (cur_node=n; cur_node; cur_node=cur_node->next) {
       if (cur_node->type == type) {
          // printf("found type: %d -> content: '%s'\n",
          //        cur_node->type,
          //       cur_node->content);
-         return ((const char*)cur_node->content);
+         return cur_node;
       }
-      const char* sub = find_element_of_type(cur_node->children, type);
+      xmlNode* sub = find_xml_element_of_type(cur_node->children, type);
       if (sub)
          return sub;
    }
@@ -190,8 +198,28 @@ find_element_of_type(xmlNode* n, xmlElementType type) {
    return NULL;
 }
 
+// like find_xml_element_type, but return the text content of the element
 const char*
-find_element_named(xmlNode* n, char* name) {
+find_element_of_type(xmlNode* n, xmlElementType type) {
+
+   xmlNode* cur_node = find_xml_element_of_type(n, type);
+   return ((cur_node) ? (char*)cur_node->content : NULL);
+}
+
+
+
+
+
+
+
+
+
+
+
+
+// find the first XML element (depth_first) with tag matching <name>
+xmlNode*
+find_xml_element_named(xmlNode* n, const char* name) {
 
    // traverse nodes at a given nesting level, looking for named tag.
    xmlNode* cur_node = NULL;
@@ -200,20 +228,40 @@ find_element_named(xmlNode* n, char* name) {
       if (cur_node->type == XML_ELEMENT_NODE) {
          if (! strcmp(name, (const char*)cur_node->name)) {
             // printf("found name: '%s'\n", name);
-
-            // find the text-value contents for the located tag
-            return find_element_of_type(cur_node->children, XML_TEXT_NODE);
+            return cur_node;
          }
       }
 
       // maybe find it recursively, at deeper nesting levels?
-      const char* sub = find_element_named(cur_node->children, name);
+      xmlNode* sub = find_xml_element_named(cur_node->children, name);
       if (sub)
          return sub;
    }
-
    return NULL;
 }
+
+// Call find_xml_element_named(), then find the first TEXT_NODE
+// child of *that* node, and return the text-content of that child.
+const char*
+find_element_named(xmlNode* n, const char* name) {
+
+   // traverse nodes at a given nesting level, looking for named tag.
+   xmlNode* tag = find_xml_element_named(n, name);
+   if (tag) {
+      // find the text-value contents for the located tag
+      return find_element_of_type(tag->children, XML_TEXT_NODE);
+   }
+   return NULL;
+}
+
+
+
+
+
+
+
+
+
 
 // === custom for test_aws.c
 
