@@ -1,6 +1,10 @@
 #ifndef __AWS4C_H__
 #define __AWS4C_H__
 
+#  ifdef __cplusplus
+extern "C" {
+#  endif
+
 /*
  *
  * Copyright(c) 2009,  Vlad Korolev,  <vlad[@]v-lad.org >
@@ -29,6 +33,13 @@ typedef struct _IOBufNode
 
 } IOBufNode;
 
+// linked-list of key/value pairs holding custom user meta-data
+typedef struct _MetaNode {
+   char*    key;
+   char*    value;
+   struct   _MetaNode* next;
+} MetaNode;
+
 
 /// IOBuf structure
 typedef struct IOBuf 
@@ -48,8 +59,10 @@ typedef struct IOBuf
    char*      lastMod;
    char*      eTag;
    size_t     contentLen;    // might be more than 2 GiB
+   MetaNode*  meta;          // x-amz-meta-* headers (1 per IOBufNode.buf)
+
    int        code;
-   char*      result;
+   char*      result;        // string for <code>, (e.g. 'Not Found')
 
 } IOBuf;
 
@@ -96,8 +109,8 @@ typedef struct IOBuf
    } while (0)
 
 
-int  aws_init();                // call once
-void aws_cleanup();             // call once
+CURLcode aws_init();                // call once
+void     aws_cleanup();             // call once
 
 void aws_reuse_connections(int b);
 void aws_reset_connection();
@@ -110,11 +123,11 @@ void aws_set_debug (int d);
 void aws_set_rrs(int r);
 
 
-void s3_set_bucket    ( char* const str );
-void s3_set_host      ( char* const str );
-void s3_set_proxy     ( char* const str );
-void s3_set_mime      ( char* const str );
-void s3_set_acl       ( char* const str );
+void s3_set_bucket    ( const char* const str );
+void s3_set_host      ( const char* const str );
+void s3_set_proxy     ( const char* const str );
+void s3_set_mime      ( const char* const str );
+void s3_set_acl       ( const char* const str );
 void s3_set_byte_range( size_t offset, size_t length );
 
 CURLcode  s3_head   ( IOBuf* b, char* const obj_name );
@@ -156,7 +169,20 @@ void   aws_iobuf_extend_dynamic( IOBuf* b, char* d, size_t len );
 
 size_t aws_iobuf_getline( IOBuf* b, char* Line, size_t size );
 size_t aws_iobuf_get_raw( IOBuf* b, char* Line, size_t size );
+size_t aws_iobuf_get_meta(IOBuf* b, char* Line, size_t size, const char* key );
+
 void   aws_iobuf_realloc( IOBuf* b );
 
+void   aws_iobuf_set_metadata( IOBuf* b, MetaNode* list);
+
+const char* aws_metadata_get  (const MetaNode** list, const char* key);
+void        aws_metadata_set  (      MetaNode** list, const char* key, const char* value);
+void        aws_metadata_reset(      MetaNode** list);
+
+
+
+#  ifdef __cplusplus
+}
+#  endif
 
 #endif

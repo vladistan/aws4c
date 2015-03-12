@@ -414,6 +414,42 @@ void test_emc_write_range(IOBuf* b) {
 }
 
 
+// We've added some features to allow storage of user-metadata on objects.
+// You manipulate a list of key/value pairs (adding and removing pairs),
+// then attach it to an iobuf that you use to write the object.  When
+// reading, these metadata are captured into a list on the IOBuf, where you
+// can look at them.
+void test_metadata(IOBuf* b) {
+   const char* obj = "test_metadata";
+
+   // delete any old copies of the object
+   printf("deleting %s ... ", obj);
+   AWS4C_CHECK( s3_delete(b, (char*)obj) );
+   printf("%s\n", b->result);
+
+   // write new emtpy object, with metadata
+   MetaNode* meta = NULL;
+   aws_metadata_set(&meta, "foo", "1");
+   aws_metadata_set(&meta, "bar", "2");
+   aws_metadata_set(&meta, "foo", "3"); /* replaces the first one */
+
+   aws_iobuf_reset(b);          /* assure no previous metadata */
+   aws_iobuf_set_metadata(b, meta);
+   
+   AWS4C_CHECK   ( s3_put(b, (char*)obj) ); /* create empty object with user metadata */
+   AWS4C_CHECK_OK( b );
+
+   // retrieve metadata from new object
+   aws_iobuf_reset(b);          /* drop all current metadata */
+
+   AWS4C_CHECK   ( s3_get(b, (char*)obj) ); /* get object plus metadata */
+   AWS4C_CHECK_OK( b );
+
+   for (meta=b->meta; meta; meta=meta->next) {
+      printf("\t%5s -> %s\n", meta->key, meta->value);
+   }
+}
+
 
 
 void
@@ -580,6 +616,18 @@ main(int argc, char* argv[]) {
       aws_iobuf_reset(b);
       aws_iobuf_growth_size(b, 1000);
       test_iobuf_extend(b);
+      return 0;
+
+
+   case 10:
+      // --- manipulate a list of user meta-data, store on an object, read
+      //     back and print.
+      //
+      //     status: WORKS
+
+      aws_set_debug(1);
+      aws_iobuf_reset(b);
+      test_metadata(b);
       return 0;
 
 

@@ -284,6 +284,16 @@ static size_t header ( void * ptr, size_t size, size_t nmemb, void * stream )
   else if ( !strncmp( ptr, "Content-Length: ", 15 )) {
      b->contentLen = strtoul( ptr + 16, NULL, 10 );
   }
+  else if ( !strncmp( ptr, "x-amz-meta-", 11 )) {
+     char* key     = ptr+11;
+     char* key_end = strchr(key, ':');
+     if (key_end) {
+        *key_end = 0;
+        char* value = key_end +2; /* skip ": " */
+        __chomp(value);
+        aws_metadata_set(&(b->meta), key, value);
+     }
+  }
 
   return nmemb * size;
 }
@@ -381,7 +391,7 @@ static FILE * __aws_getcfg ()
 /// Get S3 Request signature
 /// \internal
 /// \param resource -- URI of the object
-/// \param resSize --  size of the resoruce buffer
+/// \param resSize --  size of the resource buffer
 /// \param date -- HTTP date
 /// \param method -- HTTP method
 /// \param bucket -- bucket 
@@ -392,12 +402,18 @@ static char * GetStringToSign ( char *       resource,
                                 int          resSize, 
                                 char **      date,
                                 char * const method,
+                                MetaNode*    metadata,
                                 char * const bucket,
                                 char * const file )
 {
   char  reqToSign[2048];
   char  acl[32];
   char  rrs[64];
+
+  const size_t MAX_META = 2048;
+  char         meta[MAX_META];
+  MetaNode*    pair;
+  
 
   /// \todo Change the way RRS is handled.  Need to pass it in
   
@@ -414,17 +430,32 @@ static char * GetStringToSign ( char *       resource,
   else
     acl[0] = 0;
 
+  // print meta-data into meta[], until we run out of room
+  size_t offset=0;
+  size_t remain=MAX_META -1;    /* assure there's room for final NULL */
+  for (pair=metadata; pair; pair=pair->next) {
+     int count = snprintf( &meta[offset], remain, "x-amz-meta-%s:%s\n",
+                           pair->key, pair->value);
+     if (count > remain)
+        break;                  /* don't print partial key/value pairs */
+     remain -= count;
+     offset += count;
+  }
+  meta[offset] = 0;
+  
+
   if (useRrs)
     strncpy( rrs, "x-amz-storage-class:REDUCED_REDUNDANCY\n", sizeof(rrs));  
   else
     rrs[0] = 0;
 
 
-  snprintf ( reqToSign, sizeof(reqToSign),"%s\n\n%s\n%s\n%s%s/%s",
+  snprintf ( reqToSign, sizeof(reqToSign),"%s\n\n%s\n%s\n%s%s%s/%s",
              method,
              MimeType ? MimeType : "",
              *date,
              acl,
+             meta,
              rrs,
              resource );
 
@@ -602,10 +633,10 @@ static char * SQSSign ( char * str )
 ///    libraries that are similarly thread unsafe, it could conflict with
 ///    any other thread that uses these other libraries.
 ///
-int  aws_init () {
+CURLcode aws_init () {
    return curl_global_init(CURL_GLOBAL_ALL);
 }
-void aws_cleanup () {
+void     aws_cleanup () {
    curl_global_cleanup();
 }
 
@@ -711,7 +742,7 @@ int aws_read_config ( char * const id )
 
 
 /// Set S3 host
-void s3_set_host ( char * const str ) {
+void s3_set_host ( const char * const str ) {
 
    if (S3Host && str && !strcmp(str, S3Host))
       return;
@@ -733,7 +764,7 @@ void s3_set_host ( char * const str ) {
 /// Therefore, we only provide a way to set the proxy.
 ///
 /// Set to NULL (the default), to stop using a proxy.
-void s3_set_proxy ( char * const str ) {
+void s3_set_proxy ( const char * const str ) {
 
    if (S3Proxy && str && !strcmp(str, S3Proxy))
       return;
@@ -751,11 +782,11 @@ void s3_set_proxy ( char * const str ) {
 
 /// Select current S3 bucket
 /// \param str bucket ID
-void s3_set_bucket ( char * const str ) 
+void s3_set_bucket ( const char * const str ) 
 { Bucket = str == NULL ? NULL : strdup(str); }
 
 /// Set S3 MimeType
-void s3_set_mime ( char * const str )
+void s3_set_mime ( const char * const str )
 { MimeType = str ? strdup(str) : NULL; }
 
 /// Set byte-range.  NOTE: resets after the next GET, PUT, or POST.
@@ -767,7 +798,7 @@ void s3_set_byte_range ( size_t offset, size_t length ) {
 }
 
 /// Set S3 AccessControl
-void s3_set_acl ( char * const str )
+void s3_set_acl ( const char * const str )
 { AccessControl = str ? strdup(str) : NULL; }
 
 
@@ -793,7 +824,7 @@ CURLcode s3_put ( IOBuf* b, char * const obj_name )
   char * date = NULL;
 
   char * signature = GetStringToSign ( resource, sizeof(resource), 
-                                       &date, method, Bucket, obj_name ); 
+                                       &date, method, b->meta, Bucket, obj_name ); 
   CURLcode sc = s3_do_put_or_post( b, signature, date, resource, 0, NULL, NULL ); 
   free ( signature );
   return sc;
@@ -808,7 +839,7 @@ CURLcode s3_put2 ( IOBuf* b, char * const obj_name, char* const src_file, IOBuf*
   char * date = NULL;
 
   char * signature = GetStringToSign ( resource, sizeof(resource), 
-                                       &date, method, Bucket, obj_name ); 
+                                       &date, method, b->meta, Bucket, obj_name ); 
   CURLcode sc = s3_do_put_or_post( b, signature, date, resource, 0, src_file, response ); 
   free ( signature );
   return sc;
@@ -834,7 +865,7 @@ CURLcode s3_post ( IOBuf* b, char* const obj_name )
   char * date = NULL;
 
   char * signature = GetStringToSign ( resource, sizeof(resource), 
-                                       &date, method, Bucket, obj_name ); 
+                                       &date, method, b->meta, Bucket, obj_name ); 
   CURLcode sc = s3_do_put_or_post( b, signature, date, resource, 1, NULL, NULL ); 
   free ( signature );
   return sc;
@@ -847,7 +878,7 @@ CURLcode s3_post2 ( IOBuf* b, char* const obj_name, char* const src_file, IOBuf*
   char * date = NULL;
 
   char * signature = GetStringToSign ( resource, sizeof(resource), 
-                                       &date, method, Bucket, obj_name ); 
+                                       &date, method, b->meta, Bucket, obj_name ); 
   CURLcode sc = s3_do_put_or_post( b, signature, date, resource, 1, src_file, response ); 
   free ( signature );
   return sc;
@@ -864,7 +895,7 @@ CURLcode s3_get ( IOBuf * b, char * const obj_name )
   char * date = NULL;
 
   char * signature = GetStringToSign ( resource, sizeof(resource), 
-                                       &date, method, Bucket, obj_name ); 
+                                       &date, method, b->meta, Bucket, obj_name ); 
   CURLcode sc = s3_do_get( b, signature, date, resource, 0, NULL, NULL ); 
   free ( signature );
   return sc;
@@ -876,7 +907,7 @@ CURLcode s3_get2 ( IOBuf * b, char * const obj_name, char* const src_file, IOBuf
   char * date = NULL;
 
   char * signature = GetStringToSign ( resource, sizeof(resource), 
-                                       &date, method, Bucket, obj_name ); 
+                                       &date, method, b->meta, Bucket, obj_name ); 
   CURLcode sc = s3_do_get( b, signature, date, resource, 0, src_file, response ); 
   free ( signature );
   return sc;
@@ -891,7 +922,7 @@ CURLcode s3_head ( IOBuf * b, char * const obj_name )
   char * date = NULL;
 
   char * signature = GetStringToSign ( resource, sizeof(resource), 
-                                       &date, method, Bucket, obj_name ); 
+                                       &date, method, b->meta, Bucket, obj_name ); 
   CURLcode sc = s3_do_get( b, signature, date, resource, 1, NULL, NULL ); 
   free ( signature );
   return sc;
@@ -903,7 +934,7 @@ CURLcode s3_head2 ( IOBuf * b, char * const obj_name, char* const fname, IOBuf* 
   char * date = NULL;
 
   char * signature = GetStringToSign ( resource, sizeof(resource), 
-                                       &date, method, Bucket, obj_name ); 
+                                       &date, method, b->meta, Bucket, obj_name ); 
   CURLcode sc = s3_do_get( b, signature, date, resource, 1, fname, response ); 
   free ( signature );
   return sc;
@@ -920,7 +951,7 @@ CURLcode s3_delete ( IOBuf * b, char * const obj_name )
   char  resource [1024];
   char * date = NULL;
   char * signature = GetStringToSign ( resource, sizeof(resource), 
-                                       &date, method, Bucket, obj_name ); 
+                                       &date, method, b->meta, Bucket, obj_name ); 
   CURLcode sc = s3_do_delete( b, signature, date, resource ); 
   free ( signature );
 
@@ -958,7 +989,6 @@ s3_do_put_or_post ( IOBuf *read_b, char * const signature,
   AWS_CURL_ENTER();
   struct curl_slist *slist=NULL;
 
-
   if (MimeType) {
     snprintf ( Buf, sizeof(Buf), "Content-Type: %s", MimeType );
     slist = curl_slist_append(slist, Buf );
@@ -993,6 +1023,14 @@ s3_do_put_or_post ( IOBuf *read_b, char * const signature,
 
   snprintf ( Buf, sizeof(Buf), "Authorization: AWS %s:%s", awsKeyID, signature );
   slist = curl_slist_append(slist, Buf );
+
+  // install user meta-data
+  MetaNode* meta;
+  for (meta=read_b->meta; meta; meta=meta->next) {
+     snprintf ( Buf, sizeof(Buf), "x-amz-meta-%s: %s", meta->key, meta->value );
+     slist = curl_slist_append(slist, Buf );
+  }
+
 
   snprintf ( Buf, sizeof(Buf), "http://%s/%s", S3Host , resource );
 
@@ -1653,6 +1691,8 @@ void aws_iobuf_reset(IOBuf* bf) {
 
   iobuf_node_list_free(bf->first);
 
+  aws_metadata_reset(&bf->meta);
+
   /// wipe the base IOBuf clean (except for growth_size)
   size_t growth_size = bf->growth_size;;
   memset(bf, 0, sizeof(IOBuf));
@@ -1955,6 +1995,12 @@ size_t aws_iobuf_get_raw   ( IOBuf * B, char * Line, size_t size )
 // response received via s3_post(), but you're not sure whether there are
 // more than one IOBufNodes in the response IOBuf.
 //
+// NOTE: aws_iobuf_get_line() and aws_iobuf_get_raw() will never read past
+//      the end of the written data, so they don't have to worry about the
+//      fact that we don't write a terminal NULL.  But this function is
+//      giving you something you can treat as a single C string, so we have
+//      to make sure there's a terminal NULL.
+//
 // TBD: transfer "read_pos" in the caller's IOBuf to the corresponding
 //      position in the new IOBuf.  For now, after realloc, read_pos points
 //      at the beginning of the data.
@@ -1963,6 +2009,10 @@ void    aws_iobuf_realloc   ( IOBuf * B )
 {
   if (B->first == NULL)
     return;
+
+  // insure there is a terminal NULL
+  aws_iobuf_append(B, "", 1);
+
   if (B->first->next == NULL)
     return;
 
@@ -1989,7 +2039,73 @@ void    aws_iobuf_realloc   ( IOBuf * B )
 
 
 
+// You could maintain a list of your own (via aws_metadata_set()), then
+// install it selectively into an IOBuf.  You could also keep different
+// meta-data lists you wanted to use for different objects, and install the
+// one you wanted, without rebuilding it every time.
+//
+// NOTE: aws_iobuf_reset() will deallocate any meta-data you have added to
+//       the iobuf.  If you are going to call aws_iobuf_reset(), and you
+//       don't want to free and reallocate the meta-data list, you could do
+//       something like this:
+//
+//    MetaNode* temp = iobuf->meta;
+//    aws_iobuf_set_metadata(iobuf, NULL);
+//    aws_iobuf_reset(iobuf);
+//    aws_iobuf_set_metadata(iobuf, temp);
+//
+void aws_iobuf_set_metadata( IOBuf* b, MetaNode* list) {
+   b->meta = list;
+}
 
+
+
+// These maintain an independent list of metadata key-value pairs.
+// You can install them into an IOBuf via aws_iobuf_set_metadata().
+
+// return the value coresponding to a given key, or return NULL.
+const char* aws_metadata_get(const MetaNode** list, const char* key) {
+   const MetaNode* pair;
+   for (pair=*list; pair; pair=pair->next) {
+      if (!strcmp(key, pair->key)) {
+         return pair->value;
+      }
+   }
+   return NULL;
+}
+
+// If key already exists, replace the value.  Otherwise, push new key/val
+// onto the front of the list.  If <value> is null, then remove the entry.
+void aws_metadata_set(MetaNode** list, const char* key, const char* value) {
+   MetaNode* pair;
+   for (pair=*list; pair; pair=pair->next) {
+      if (!strcmp(key, pair->key)) {
+         free(pair->value);
+         pair->value = NULL;
+         break;
+      }
+   }
+   if (!pair) {
+      pair        = malloc(sizeof(MetaNode));
+      pair->key   = strdup(key);
+      pair->value = NULL;
+      pair->next  = *list;
+      *list       = pair;  /* push onto front of list */
+   }
+   pair->value = strdup(value);
+}
+
+void aws_metadata_reset(MetaNode** list) {
+   MetaNode* pair;
+   MetaNode* next;
+   for (pair=*list; pair; pair=next) {
+      next = pair->next;
+      free(pair->key);
+      free(pair->value);
+      free(pair);
+   }
+   *list=NULL;
+}
 
 
 /*!
