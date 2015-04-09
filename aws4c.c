@@ -434,10 +434,16 @@ static char * GetStringToSign ( char *       resource,
   size_t offset=0;
   size_t remain=MAX_META -1;    /* assure there's room for final NULL */
   for (pair=metadata; pair; pair=pair->next) {
+     size_t expect = strlen(pair->key) + strlen(pair->value) + 13;
+     if (expect > remain)
+        break;                  /* don't print partial key/value pairs */
      int count = snprintf( &meta[offset], remain, "x-amz-meta-%s:%s\n",
                            pair->key, pair->value);
-     if (count > remain)
-        break;                  /* don't print partial key/value pairs */
+     if (count != expect) {
+         fprintf(stderr, "Error computing meta-data size: expect=%ld actual=%d\n",
+                 expect, count);
+         exit(1);
+     }
      remain -= count;
      offset += count;
   }
