@@ -40,30 +40,43 @@ typedef struct _MetaNode {
    struct   _MetaNode* next;
 } MetaNode;
 
+typedef enum {
+   IOBF_CTE  = 0x01,            // transfer-encoding = chunked
+} IOBufFFlags;
+
+
+// signatures for standard libcurl readfunc / writefunc
+typedef size_t (*ReadFnPtr) ( void * ptr, size_t size, size_t nmemb, void * stream );
+typedef size_t (*WriteFnPtr)( void * ptr, size_t size, size_t nmemb, void * stream );
 
 /// IOBuf structure
 typedef struct IOBuf 
 {
-   IOBufNode* first;
-   IOBufNode* last;
+   IOBufNode*  first;
+   IOBufNode*  last;
 
-   IOBufNode* reading;
-   char*      read_pos;
+   IOBufNode*  reading;
+   char*       read_pos;
+   WriteFnPtr  write_fn;      // libcurl adding data to the IOBuf (during GET)
 
-   IOBufNode* writing;
+   IOBufNode*  writing;
+   WriteFnPtr  read_fn;       // libcurl sending from the IOBuf (during PUT/POST)
 
-   size_t     len;           // total storage in IOBufNode buffers (sum of len)
-   size_t     write_count;   // total written data (sum of write_counts)
-   size_t     growth_size;   // controls default growth, in aws_iobuf_append fns
+   size_t      len;           // total storage in IOBufNode buffers (sum of len)
+   size_t      write_count;   // total written data (sum of write_counts)
+   size_t      avail;         // total unread-data avail for read (e.g aws_iobuf_get_raw())
+   size_t      growth_size;   // controls default growth, in aws_iobuf_append fns
 
-   char*      lastMod;
-   char*      eTag;
-   size_t     contentLen;    // might be more than 2 GiB
-   MetaNode*  meta;          // x-amz-meta-* headers (1 per IOBufNode.buf)
+   char*       lastMod;
+   char*       eTag;
+   size_t      contentLen;    // might be more than 2 GiB
+   MetaNode*   meta;          // x-amz-meta-* headers (1 per IOBufNode.buf)
 
-   int        code;
-   char*      result;        // string for <code>, (e.g. 'Not Found')
+   int         code;
+   char*       result;        // string for <code>, (e.g. 'Not Found')
+   unsigned char flags;
 
+   void*       user_data;     // e.g. to pass extra info to a readfunc
 } IOBuf;
 
 
@@ -97,6 +110,17 @@ typedef struct IOBuf
       }                                                                 \
    } while (0)
 
+// like AWS_CHECK(), but calls return instead of exit()
+#define AWS4C_CHECK1( FUNCALL )                                         \
+   do {                                                                 \
+      CURLcode rc = (FUNCALL);                                          \
+      if ( rc != CURLE_OK ) {                                           \
+         fprintf(stderr, "libcurl call failed at %s, line %d\nERROR: %s\n", \
+                 __FILE__, __LINE__, curl_easy_strerror(rc));           \
+         return(1);                                                     \
+      }                                                                 \
+   } while (0)
+
 #define AWS4C_OK( IOBUF )    ( (IOBUF)->code == 200 )
 
 #define AWS4C_CHECK_OK( IOBUF )                                         \
@@ -105,6 +129,16 @@ typedef struct IOBuf
          fprintf(stderr, "CURL call failed at %s, line %d\nERROR: %d '%s'\n", \
                  __FILE__, __LINE__, (IOBUF)->code, (IOBUF)->result);   \
          exit(1);                                                       \
+      }                                                                 \
+   } while (0)
+
+// like AWS_CHECK_OK(), but calls return, instead of exit()
+#define AWS4C_CHECK_OK1( IOBUF )                                         \
+   do {                                                                 \
+      if ( (IOBUF->code != 200 ) ) {                                    \
+         fprintf(stderr, "CURL call failed at %s, line %d\nERROR: %d '%s'\n", \
+                 __FILE__, __LINE__, (IOBUF)->code, (IOBUF)->result);   \
+         return(1);                                                       \
       }                                                                 \
    } while (0)
 
@@ -167,11 +201,15 @@ void   aws_iobuf_append_dynamic( IOBuf* b, char* d, size_t len );
 void   aws_iobuf_extend_static ( IOBuf* b, char* d, size_t len );
 void   aws_iobuf_extend_dynamic( IOBuf* b, char* d, size_t len );
 
+void   aws_iobuf_realloc( IOBuf* b );
+
 size_t aws_iobuf_getline( IOBuf* b, char* Line, size_t size );
 size_t aws_iobuf_get_raw( IOBuf* b, char* Line, size_t size );
 size_t aws_iobuf_get_meta(IOBuf* b, char* Line, size_t size, const char* key );
 
-void   aws_iobuf_realloc( IOBuf* b );
+void   aws_iobuf_readfunc  (IOBuf* b, ReadFnPtr  read_fn);
+void   aws_iobuf_writefunc (IOBuf* b, WriteFnPtr write_fn);
+void   aws_iobuf_chunked_transfer_encoding(IOBuf* b, int enable);
 
 void   aws_iobuf_set_metadata( IOBuf* b, MetaNode* list);
 

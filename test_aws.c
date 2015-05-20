@@ -1,5 +1,10 @@
 // Unit-tests for some of the functionality in aws4c
 // This especially includes new functionality
+//
+//   make test_aws
+//   ./test_aws <ip_address>[:<port] <test_number>  [ <proxy_IP_w_port> ]
+
+
 
 #include <assert.h>
 
@@ -9,6 +14,7 @@
 #include <stdio.h>
 #include <time.h>               /* difftime() */
 #include <sys/time.h>           /* gettimeofday(), struct timeval  */
+#include <ctype.h>              /* DEBUGGING: iscntrl() */
 
 #include "aws4c.h"
 #include "aws4c_extra.h"
@@ -34,11 +40,16 @@ void s3_connect(char* host_ip, char* proxy_ip) {
    if (connected)
       return;
 
-   aws_read_config(getenv("USER"));
+   if (aws_read_config(getenv("USER"))) {
+      // probably missing a line in ~/.awsAuth
+      fprintf(stderr, "read-config for user '%s' failed\n", getenv("USER"));
+      exit(1);
+   }
 	aws_reuse_connections(1);
 
-   // fix this to match your site and testing target.
-	snprintf(buff, BUFF_LEN, "%s:9020", host_ip);
+   // // fix this to match your site and testing target.
+	// snprintf(buff, BUFF_LEN, "%s:9020", host_ip);
+   snprintf(buff, BUFF_LEN, "%s", host_ip);
 	s3_set_host(buff);
 
    if (proxy_ip)
@@ -452,10 +463,409 @@ void test_metadata(IOBuf* b) {
 
 
 
+
+#ifdef TEST_AWS_PTHREADS
+// ...........................................................................
+// Experiment with streaming PUT, where two threads work together to
+// incrementally add data into a PUT.
+//
+// This code is only included if your define TEST_AWS_PTHREADS (at the top
+// of this file).  If building with pthreads causes you some trouble, you
+// can leave it undefined, and this test won't be included.
+// ...........................................................................
+
+
+// This custom readfunc shows how a streaming operation could be implemented.
+// We block on a semaphore until data is available then provide it to the
+// ongoing PUT.
+#include <semaphore.h>
+#include <pthread.h>
+sem_t  sem1;
+sem_t  sem2;
+
+typedef struct ContextBuf {
+   void*  ptr;
+   size_t size;
+} ContextBuf;
+
+// double-buffered, so producer/consumer can work in parallel
+typedef struct Context {
+   //   ContextBuf buf[2];
+   //   int        read_pos;
+   ContextBuf buf;              // Nevermind.  Single-buffered.
+} Context;
+
+
+
+// ---------------------------------------------------------------------------
+//
+// (11) test-function inserts a Context object (instead of a buffer) into
+// the IOBuf using aws_iobuf_append().  Test-function also inserts a custom
+// readfunc.  Then it starts a PUT.  When curl makes a callback to the new
+// readfunc, the readfunc stores a pointer to that buffer into the context,
+// and unlocks the producer, then blocks waiting for the producer.  When
+// producer has filled the buffer (provided by the curl callback) it
+// unlocks the consumer (i.e. the freadfunc), and blocks waiting for more
+// work.  Producer consumer ping-pong like this, streaming data into the
+// PUT.
+//
+// ---------------------------------------------------------------------------
+//
+// *** TBD
+// variation that uses Chunked Transfer-Encoding, so that the total size
+// doesn't have to be known ahead of time.
+size_t streaming_readfunc_cte (void* ptr, size_t size, size_t nmemb, void* stream) {
+   IOBuf*   b     = (IOBuf*)stream;
+   Context* ctx   = (Context*)b->writing->buf;
+   size_t   total = (size * nmemb);
+
+   // producer is waiting for context
+   ctx->buf.ptr  = ptr;
+   ctx->buf.size = total;
+   fprintf(stderr, "\nconsumer requesting %ld\n", total); // simulate doing some work
+   sem_post(&sem1);             // let producer fill our buffer
+
+   fprintf(stderr, "consumer waiting\n"); // simulate doing some work
+   sem_wait(&sem2);             // wait for producer to finish
+
+   fprintf(stderr, "consumer wrote %ld\n", ctx->buf.size);
+   return (ctx->buf.size);
+}
+
+
+
+// Curl is telling us how much data it can handle, but we can supply less
+// (as long as it's not zero -- zero means we're reporting EOF).  Return
+// the amount we actually supplied.
+size_t streaming_readfunc (void* ptr, size_t size, size_t nmemb, void* stream) {
+   IOBuf*   b     = (IOBuf*)stream;
+   Context* ctx   = (Context*)b->writing->buf;
+   size_t   total = (size * nmemb);
+
+   // producer is waiting for context
+   ctx->buf.ptr  = ptr;
+   ctx->buf.size = total;
+   fprintf(stderr, "\nconsumer requesting %ld\n", total); // simulate doing some work
+   sem_post(&sem1);             // let producer fill our buffer
+
+   fprintf(stderr, "consumer waiting\n"); // simulate doing some work
+   sem_wait(&sem2);             // wait for producer to finish
+
+   fprintf(stderr, "consumer wrote %ld\n", ctx->buf.size);
+   return (ctx->buf.size);
+}
+// this guy provides the data used by streaming_readfunc()
+void* producer_thread(void* arg) {
+   static const char*   buf      = (const char*)"This is some text\n";
+   static       size_t  buf_size = 0;
+
+   if (! buf_size)
+      buf_size = strlen(buf);
+   Context*             ctx      = (Context*)arg;
+
+   int    i;
+   for (i=0; i<8; ++i) {
+
+      fprintf(stderr, "producer waiting\n"); // simulate doing some work
+      sem_wait(&sem1);          // wait for consumer to give us a buffer
+
+      size_t req_size  = ctx->buf.size;
+      size_t move_size = ((ctx->buf.size < buf_size) ? ctx->buf.size : buf_size);
+      fprintf(stderr, "producer supplying %ld / %ld\n", move_size, req_size);
+      memmove(ctx->buf.ptr, buf, move_size);
+      ctx->buf.size = move_size; // show consumer how much we supplied
+      // sleep(2);                 // simulate e.g. file latency
+
+      fprintf(stderr, "producer wrote data\n"); // pretend we filled <buf>
+      sem_post(&sem2);
+   }
+
+   // let consumer know there's no more data coming
+   fprintf(stderr, "producer waiting (final)\n"); // simulate doing some work
+   sem_wait(&sem1);          // wait for consumer to give us a buffer
+
+   fprintf(stderr, "producer supplying 0\n"); // bupkis
+   ctx->buf.size = 0;
+   sem_post(&sem2);
+
+   return NULL;
+}
+
+// We have separate threads for a producer and a consumer.  The consumer
+// (i.e. streaming_readfunc) is adding data into a PUT stream.  The
+// producer (i.e. producer_thread) is getting more data for the consumer.
+// (Variations on this theme could use Chunked Trasfer-Encoding, if the
+// final size of the object is unknown, or could provide the ultimate size
+// of the object in the initial header.)
+void test_streaming_write(IOBuf* b) {
+   const char* obj = "streaming_write";
+
+   // delete any old copies of the object
+   printf("deleting %s ... ", obj);
+   AWS4C_CHECK( s3_delete(b, (char*)obj) );
+   printf("%s\n", b->result);
+
+   // create Context;
+   //   Context* ctx = (Context*)malloc(sizeof(Context));
+   Context ctx;
+
+   // NOTE: libaws4c will pass a pointer-to-the-IOBuf to
+   //       readfunc/writefunc.  We "cheat" by stashing a Context instead
+   //       of an actual buffer.  This is okay because our
+   //       streaming_readfunc() expects this.  Either of the append/extend
+   //       forms of aws_*_iobuf() is safe: libaws4c doesn't touch the
+   //       contents of the user-buffer.  However, for a PUT, aws4c will
+   //       supply IOBuf.write_count as the length.  "extend" is for reads
+   //       so it doesn't change the IOBuf write_count but "append" is for
+   //       writes, and it will give PUT whatever length we provide.  The
+   //       append-call should also use the "static" form, so that
+   //       aws_iobuf_reset() won't call free() on it.
+   //
+   // NOTE: The length we supply here has to match the amount the producer
+   //       will actually supply.  (i.e. "8*18" matches the producer-thread
+   //       doing 8 iterations, supplying 18 characters per iteration.
+   //
+   //       The alternative is to use Chunked Transfer-Encoding (CTE), and
+   //       have the consumer add each string with a CTE header.
+   // 
+   aws_iobuf_reset(b);          // make sure context is the only thing
+   aws_iobuf_append_static(b, (char*)&ctx, 8*18); // "cheating" (see NOTE above)
+   aws_iobuf_readfunc(b, &streaming_readfunc);
+
+   // start threading
+   sem_init(&sem1, 0, 0);
+   sem_init(&sem2, 0, 0);
+   pthread_t prod;
+   pthread_create(&prod, NULL, &producer_thread, &ctx);
+
+   // let producer/consumer work together to keep data flowwing into the
+   // PUT, using incremental additions.
+   AWS4C_CHECK   ( s3_put(b, (char*)obj) ); /* create empty object with user metadata */
+   AWS4C_CHECK_OK( b );
+
+}
+
+
+
+// ---------------------------------------------------------------------------
+//
+// (12) In this case, the producer (modeling fuse write) supplies the
+// buffer via a simple aws_iobuf_append_static(), and the consumer (curl
+// readfunc) repeatedly reads from it, using the normal aws_iobuf_get_raw()
+// calls.  This approach makes more sense, in the case of fuse, because the
+// producer's buffer may be significantly larger than the 16k that is a
+// typical max for curl). This approach also turns out to be a lot simpler,
+// semantically.  Plus, we don't need a Context object.
+//
+// To be more like the fuse-write case, we're also using chunked
+// transfer-encoding.  That means each write has to include a CTE "header",
+// and CTE "footer".  However, curl takes care of this for us.  If curl
+// sees the "Transfer-coding: chunked" header (see
+// aws_iobuf_chunked_transfer_encoding), then the callbacks here are given
+// size 16372, which is 16k-12.  16k is the default max for curl buff-size,
+// and 12 is the total size of CTE header + footer.
+//
+// We also set up the caller to do double-buffering.  That allows the
+// producer to fill one buffer, while our readfunc is copying the other one
+// to curl.  However, the consumer (i.e. our readfunc) must now be able to
+// distinguish "end of IOBuf" from "end of data".  We could do this ad-hoc
+// by having a static variable that we set when we get end-of-buff, and
+// treating 2 EOBs in a row as EOF.  Instead, I've added a flag to the
+// IOBuf, which the producer can set for the case of EOF.
+//
+// sem1 means "IOBuf drained, readfunc done with it"
+// sem2 means "IOBuf filled, producer done with it"
+//
+// ---------------------------------------------------------------------------
+
+size_t streaming_readfunc2 (void* ptr, size_t size, size_t nmemb, void* stream) {
+   IOBuf*   b     = (IOBuf*)stream;
+   size_t   total = (size * nmemb);
+   fprintf(stderr, "\n--- consumer buff-size %ld\n", total);
+
+   sem_wait(&sem2);             // wait for producer to fill buffers
+   fprintf(stderr, "--- consumer got %ld\n", b->write_count);
+
+   if (b->write_count == 0)
+      return 0;                 // EOF
+
+   // move producer's data into curl buffers.
+   // (Might take more than one callback)
+   size_t move_req = ((size <= b->write_count) ? size : b->write_count);
+   size_t moved    = aws_iobuf_get_raw(b, (char*)ptr, move_req);
+   fprintf(stderr, "--- consumer wrote %ld / %ld\n", moved, move_req);
+
+   if (moved < b->write_count)
+      sem_post(&sem2);          // next callback is pre-approved
+   else
+      sem_post(&sem1);          // tell producer that buffer is used
+
+   return moved;
+}
+// Q: Does curl construct the CTE header/tailer for us?
+//
+// A: YES!  Curl calls our callback with size*nmemb == 16372.  This is
+//    16k-12, so curl is clearly reserving space for the CTE header and
+//    tailer (12 bytes total), and filling them in for us!
+//
+// NOTE: IOBuf does not currently provide infomation about how much unread
+//       data is available.  Even if it did, it's still possible that
+//       aws_iobuf_get_raw() would theoretically return less than that.
+//       So, we write the CTE header *after* we've written the contents.
+size_t streaming_readfunc2b_cte (void* ptr, size_t size, size_t nmemb, void* stream) {
+   IOBuf*   b     = (IOBuf*)stream;
+   size_t   total = (size * nmemb);
+   fprintf(stderr, "\n--- consumer curl buff %ld\n", total);
+
+   // wait for producer to fill buffers
+   sem_wait(&sem2);
+   fprintf(stderr, "--- consumer avail-data: %ld\n", b->avail);
+
+   if (b->write_count == 0) {
+      fprintf(stderr, "--- consumer got EOF\n");
+      sem_post(&sem1);
+      return 0;
+   }
+
+   // move producer's data into curl buffers.
+   // (Might take more than one callback)
+   size_t move_req = ((total <= b->avail) ? total : b->avail);
+   size_t moved    = aws_iobuf_get_raw(b, (char*)ptr, move_req);
+
+   if (b->avail) {
+      fprintf(stderr, "--- consumer iterating\n");
+      sem_post(&sem2);          // next callback is pre-approved
+   }
+   else {
+      fprintf(stderr, "--- consumer done with buffer (?)\n");
+      sem_post(&sem1);          // tell producer that buffer is used
+   }
+
+   return moved;
+}
+
+// Makes more sense for the producer to provide the buffer for Context,
+// rather than the consumer.  (See comments at streaming_read()).  We
+// allocate enough for 8 iterations, where each iteration should supply
+// enough for two callbacks to streaming_readfunc2().
+//
+// TBD: double-buffering actually fairly easy, this way.  Producer would
+// just have two buffers, and would trade off aws_iobuf_append_static()
+// calls with them.  However, this means we must allow the client to
+// distinguish between end-of-current-buffer, and no-more-buffer-data.
+// We do that as follows:
+//  buffer
+
+void* producer_thread2(void* arg) {
+   static const size_t  BUF_SIZE = (16*1024*2*8);
+   static       char*   buf[2];
+
+   // double-buffering
+   buf[0] = (char*)malloc(BUF_SIZE);
+   buf[1] = (char*)malloc(BUF_SIZE);
+   if (!buf[0] || !buf[1]) {
+      fprintf(stderr, "--- producer malloc failed (%ld bytes)\n", BUF_SIZE);
+      exit(1);
+   }
+   int    curr = 0;             // which buf[] can we write?
+
+   IOBuf* b = (IOBuf*)arg;
+   int    i;
+   for (i=0; i<8; ++i) {
+
+      // initialize data
+      fprintf(stderr, "--- producer initializing %ld bytes, in buff[%d]\n", BUF_SIZE, curr);
+      memset(buf[curr], '0'+i, BUF_SIZE-1);
+      buf[curr][BUF_SIZE -1] = 0;
+
+      fprintf(stderr, "--- producer waiting for IOBuf\n"); // readfunc done with IOBuf?
+      sem_wait(&sem1);
+
+      // install buffer into IOBuf
+      aws_iobuf_reset(b);
+      aws_iobuf_append_static(b, buf[curr], BUF_SIZE); // "static" so iobuf_reset() won't free()
+      fprintf(stderr, "--- producer appended data for consumer\n");
+
+      // let readfunc move data
+      sem_post(&sem2);
+      curr ^= 1;                // toggle <curr>, so we can work on unused buff
+   }
+
+   // signal EOF to consumer
+   fprintf(stderr, "--- producer indicating EOF\n");
+   sem_wait(&sem1);
+   aws_iobuf_reset(b);
+   sem_post(&sem2);
+
+   // wait for consumer
+   sem_wait(&sem1);
+
+   free(buf[0]);
+   free(buf[1]);
+
+   return NULL;
+}
+
+void test_streaming_write2(IOBuf* b) {
+   const char* obj = "streaming_write2";
+
+   // delete any old copies of the object
+   printf("deleting %s ... ", obj);
+   AWS4C_CHECK( s3_delete(b, (char*)obj) );
+   printf("%s\n", b->result);
+
+   aws_iobuf_reset(b);
+   aws_iobuf_chunked_transfer_encoding(b, 1);
+   ///   aws_iobuf_readfunc(b, &streaming_readfunc2_cte);
+   aws_iobuf_readfunc(b, &streaming_readfunc2b_cte);
+
+   // start threading
+   sem_init(&sem1, 0, 1);       // let producer start
+   sem_init(&sem2, 0, 0);
+   pthread_t prod;
+   pthread_create(&prod, NULL, &producer_thread2, b);
+
+   // let producer/consumer work together to keep data flowwing into the
+   // PUT, using incremental additions.
+   AWS4C_CHECK   ( s3_put(b, (char*)obj) ); /* create empty object with user metadata */
+   AWS4C_CHECK_OK( b );
+
+   aws_iobuf_chunked_transfer_encoding(b, 0);
+}
+
+
+
+#else // TEST_AWS_PTHREADS not defined
+
+void test_streaming_write(IOBuf* b) {
+   fprintf(stderr, "This test is not implemented\n");
+   // fprintf(stderr, "#define TEST_AWS_PTHREADS, then run 'make test_aws' again\n");
+   fprintf(stderr, "run 'make clean', then 'make PTHREADS=1'\n");
+   exit(1);
+}
+void test_streaming_write2(IOBuf* b) {
+   fprintf(stderr, "This test is not implemented\n");
+   // fprintf(stderr, "#define TEST_AWS_PTHREADS, then run 'make test_aws' again\n");
+   fprintf(stderr, "run 'make clean', then 'make PTHREADS=1'\n");
+   exit(1);
+}
+#endif // TEST_AWS_PTHREADS 
+
+
+
+
+
+
+
+
+
+
 void
 usage(char* prog_name, size_t exit_code) {
    fprintf(stderr, "Usage: %s <ip_address> <test_number> [ <proxy_ip_w_optional_port> ]\n",
            prog_name);
+   fprintf(stderr, "\n");
+   fprintf(stderr, "Specify <_ip_address> as xx.xx.xx.xx:port, if you need a port\n");
    exit(exit_code);
 }
 
@@ -628,6 +1038,30 @@ main(int argc, char* argv[]) {
       aws_set_debug(1);
       aws_iobuf_reset(b);
       test_metadata(b);
+      return 0;
+
+
+   case 11:
+      // --- do a streaming write, by using a custom readfunc.
+      //     The readfunc blocks until more data is available.
+      //
+      //     status: WORKS
+
+      aws_set_debug(1);
+      aws_iobuf_reset(b);
+      test_streaming_write(b);
+      return 0;
+
+
+   case 12:
+      // --- do a streaming write, by using a custom readfunc.
+      //     The readfunc blocks until more data is available.
+      //
+      //     status: 
+
+      aws_set_debug(1);
+      aws_iobuf_reset(b);
+      test_streaming_write2(b);
       return 0;
 
 

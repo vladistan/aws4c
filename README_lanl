@@ -93,8 +93,41 @@ library support to be used:
     s3_put(io_buf, obj_name);
 
 
+(6) user metadata on objects
 
-(6) extras
+You can add custom metadata to objects.
+
+
+(7) streaming reads/writes, and chunked transfer-encoding
+
+These are independent things that you can do, or you can combine them.  The
+motivation for a streaming PUT (for example), is that you have a
+data-producer that is providing data buffers, and you want to write them
+into the PUT stream as they become available, rather than buffering an
+entire object before writing, or reading it from a file.  So, you supply a
+custom curl readfunc, which blocks (e.g. on a posix semaphore) until data
+is available, then adds it to the stream (e.g. by moving it into curl's
+buffer given to the readfunc, and returning).  [See case 11 and 12 in
+test_aws.c.]
+
+It may be that you don't know ahead of time how much data your
+data-producer will produce.  In this case, you can't supply a length
+(CURLOPT_INFILESIZE) in the initial PUT header.  So, you can now get
+libaws4c to suppress the INFILESIZE header, and to provide a
+"Transfer-encoding: chunked" header, instead.  Just call
+aws_iobuf_chunked_transfer_encoding(), to enable/disable.
+
+Note that when you enable CTE, you do not have to implement the CTE
+header/footer yourself (e.g. in a custom readfunc).  Curl will generate the
+header/footer itself, and call whatever readfunc is used with a buff-size
+reduced by 12 bytes (to account for the CTE header/footer).
+
+IOBuf now also supports an "avail" member, which tells how much unread data
+is there.
+
+
+
+(8) extras
 
 The 0.5.2 makefile builds a library, libaws4c.  We also provide some
 debugging functions and XML support, which probably should not be part of
@@ -105,9 +138,12 @@ production library to be as big.
 
 
 
-
-
-(7) unit-tests
+(9) unit-tests
 
 Feel free to add new unit-tests to test_aws.c This allows simple tests of
 new functions, and provides a crude regression-test.
+
+NOTE: There are some tests that currently depend on posix threads.  Because
+this may not build on some systems, this is an option that is disabled by
+default.  If you explicitly call make test_aws_threaded, you'll get the
+pthreads tests, as well.

@@ -1,6 +1,6 @@
 all: s3_get s3_put sqs_example s3_delete lib lib_extra test_aws
 
-VERSION=0.5.3
+VERSION=0.5.4
 DNAME="aws4c-${VERSION}"
 
 LIB       = libaws4c
@@ -13,11 +13,31 @@ XML_INC_DIR = /usr/include/libxml2
 
 CFLAGS = -g -Wall -I $(XML_INC_DIR) -L .
 
-LDLIBS=`curl-config --libs` -lcrypto
+# -laws4c -laws4c_extra -lcurl -lxml2 -lcrypto
+LDLIBS = `curl-config --libs` -lcrypto
+
+
+# NOTE: There is now some code in test_aws.c which uses pthreads.
+#       Because some installations won't support this, this
+#       part of the code is not compiled by default.  To enable it,
+#       must do something like this:
+#
+#          make [...] PTHREADS=1
+#
+#       where "[...]" can be empty, if you want to make everything.  You
+#       can always 'make clean' then rebuild (with or without
+#       "PTHREADS=1"), if you change your mind.
+
+TEST_LIBS = -laws4c -laws4c_extra `curl-config --libs` -lxml2 -lcrypto
+
+PTHREADS :=
+ifneq ($(PTHREADS),)
+   CFLAGS  += -DTEST_AWS_PTHREADS
+   TEST_LIBS += -lpthread
+endif
 
 
 
-aws4c.o: aws4c.h
 
 s3_get:      aws4c.o 
 s3_put:      aws4c.o 
@@ -30,10 +50,16 @@ lib: aws4c.o aws4c.h
 lib_extra: aws4c_extra.o aws4c_extra.h
 	ar -cvr $(LIB_EXTRA).a $<
 
-test_%: test_%.o lib lib_extra
-	$(CC) $(CFLAGS) $(LDFLAGS) -o $@ $< -laws4c -laws4c_extra -lcurl -lxml2 -lcrypto
 
-%.o: %.c
+test_%: test_%.o lib lib_extra
+	$(CC)  $(CFLAGS) $(LDFLAGS) -o $@ $< $(TEST_LIBS)
+
+test:
+	@ echo "THREADS = '$(THREADS)'"
+	@ echo "CPPFLAGS = $(CPPFLAGS)"
+	@ echo "TEST_LIBS = $(TEST_LIBS)"
+
+%.o: %.c aws4c.h
 	$(CC) -c $(CFLAGS) $(LDFLAGS) -o $@ $<
 
 

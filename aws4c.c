@@ -367,8 +367,7 @@ static FILE * __aws_getcfg ()
   int rv;
   char ConfigFile[256];
   /// Compose FileName and check
-  snprintf ( ConfigFile, sizeof(ConfigFile) - 3, "%s/.awsAuth",
-             getenv("HOME"));
+  snprintf ( ConfigFile, sizeof(ConfigFile) -3, "%s/.awsAuth", getenv("HOME"));
   __debug ( "Config File %s", ConfigFile );
 
   struct stat sBuf;
@@ -582,9 +581,9 @@ static int SQSRequest ( IOBuf *b, char * verb, char * const url )
   curl_easy_setopt ( ch, CURLOPT_POST, 1 );
   curl_easy_setopt ( ch, CURLOPT_POSTFIELDSIZE , 0 );
   curl_easy_setopt ( ch, CURLOPT_HEADERFUNCTION, header );
-  curl_easy_setopt ( ch, CURLOPT_WRITEFUNCTION, writefunc );
+  curl_easy_setopt ( ch, CURLOPT_WRITEFUNCTION, (b->write_fn ? b->write_fn : writefunc) );
   curl_easy_setopt ( ch, CURLOPT_WRITEDATA, b );
-  curl_easy_setopt ( ch, CURLOPT_READFUNCTION, readfunc );
+  curl_easy_setopt ( ch, CURLOPT_READFUNCTION, (b->read_fn ? b->read_fn : readfunc) );
   curl_easy_setopt ( ch, CURLOPT_READDATA, b );
 
   if (S3Proxy)
@@ -661,7 +660,7 @@ void aws_set_id ( char * const id )
 /// Set AWS account access key
 /// \param key new AWS authentication key
 void aws_set_key ( char * const key )   
-{ awsKey = key == NULL ? NULL : strdup(key); }
+{ awsKey = ((key == NULL) ? NULL : strdup(key)); }
 
 /// Set AWS account access key ID
 /// \param keyid new AWS key ID
@@ -730,7 +729,11 @@ int aws_read_config ( char * const id )
     }
   }
   /// Return error if not found
-  if ( awsKeyID == NULL ) return -1;
+  if ( awsKeyID == NULL ) {
+     __debug("Didn't find user %s in config-file\n", id);
+     return -1;
+  }
+
   return 0;
 }
 
@@ -789,11 +792,11 @@ void s3_set_proxy ( const char * const str ) {
 /// Select current S3 bucket
 /// \param str bucket ID
 void s3_set_bucket ( const char * const str ) 
-{ Bucket = str == NULL ? NULL : strdup(str); }
+{ Bucket = ((str) ? strdup(str) : NULL); }
 
 /// Set S3 MimeType
 void s3_set_mime ( const char * const str )
-{ MimeType = str ? strdup(str) : NULL; }
+{ MimeType = ((str) ? strdup(str) : NULL); }
 
 /// Set byte-range.  NOTE: resets after the next GET, PUT, or POST.
 /// If emc-compatibility is enabled, you can use this to append to objects,
@@ -805,7 +808,7 @@ void s3_set_byte_range ( size_t offset, size_t length ) {
 
 /// Set S3 AccessControl
 void s3_set_acl ( const char * const str )
-{ AccessControl = str ? strdup(str) : NULL; }
+{ AccessControl = ((str) ? strdup(str) : NULL); }
 
 
 /// EMC supports some extended functionality, such as using byte-ranges
@@ -983,6 +986,12 @@ CURLcode s3_delete ( IOBuf * b, char * const obj_name )
 ///       complete, right?), but this seems risky and confusing.  Instead,
 ///       we support a separate IOBuf, to receive server-response output
 ///       from the writefunc.
+///
+// NOTE: We now allow "chunked transfer-encoding" with streaming writes.
+///      You would set up the IOBuf with a negative write-count, and
+///      install a custom readfunc().  See example in test_aws4c.c (case
+///      12)
+
 static CURLcode
 s3_do_put_or_post ( IOBuf *read_b, char * const signature, 
                     char * const date, char * const resource,
@@ -993,8 +1002,11 @@ s3_do_put_or_post ( IOBuf *read_b, char * const signature,
   FILE* upload_fp = NULL;
 
   AWS_CURL_ENTER();
-  struct curl_slist *slist=NULL;
 
+  int chunked = (read_b->flags & IOBF_CTE);
+
+  // accumulate all custom headers into <slist>
+  struct curl_slist *slist=NULL;
   if (MimeType) {
     snprintf ( Buf, sizeof(Buf), "Content-Type: %s", MimeType );
     slist = curl_slist_append(slist, Buf );
@@ -1037,6 +1049,10 @@ s3_do_put_or_post ( IOBuf *read_b, char * const signature,
      slist = curl_slist_append(slist, Buf );
   }
 
+  // sounds like CTE is supposed to be the default, if length is not
+  // provided, but we might as well be explicit.
+  if (chunked)
+     slist = curl_slist_append(slist, "Transfer-Encoding: chunked");
 
   snprintf ( Buf, sizeof(Buf), "http://%s/%s", S3Host , resource );
 
@@ -1056,7 +1072,9 @@ s3_do_put_or_post ( IOBuf *read_b, char * const signature,
   // disabled, writedummyfunc will suppress the output.  Otherwise, if
   // debugging is on, the response will go to stdout.
   if (write_b) {
-    curl_easy_setopt ( ch, CURLOPT_WRITEFUNCTION, writefunc );
+    curl_easy_setopt ( ch, CURLOPT_WRITEFUNCTION, ( write_b->write_fn
+                                                    ? *(write_b->write_fn)
+                                                   : writefunc) );
     curl_easy_setopt ( ch, CURLOPT_WRITEDATA, write_b );
   }
   else if (!debug)
@@ -1075,14 +1093,20 @@ s3_do_put_or_post ( IOBuf *read_b, char * const signature,
       exit(1);
     }
 
-    curl_easy_setopt ( ch, CURLOPT_READFUNCTION, NULL );
+    curl_easy_setopt ( ch, CURLOPT_READFUNCTION, (read_b->read_fn
+                                                  ? *(read_b->read_fn)
+                                                  : NULL) );
     curl_easy_setopt ( ch, CURLOPT_READDATA, upload_fp );
     curl_easy_setopt ( ch, CURLOPT_INFILESIZE_LARGE, (curl_off_t)stat_info.st_size);
   }
   else {
-     curl_easy_setopt ( ch, CURLOPT_READFUNCTION, readfunc );
+     curl_easy_setopt ( ch, CURLOPT_READFUNCTION, (read_b->read_fn
+                                                   ? *(read_b->read_fn)
+                                                   : readfunc) );
      curl_easy_setopt ( ch, CURLOPT_READDATA, read_b );
-     curl_easy_setopt ( ch, CURLOPT_INFILESIZE, read_b->write_count );
+
+     if (! chunked)
+        curl_easy_setopt ( ch, CURLOPT_INFILESIZE, read_b->write_count );
   }
 
 
@@ -1161,11 +1185,11 @@ s3_do_get ( IOBuf* b, char* const signature,
       exit(1);
     }
 
-    curl_easy_setopt ( ch, CURLOPT_WRITEFUNCTION, NULL );
+    curl_easy_setopt ( ch, CURLOPT_WRITEFUNCTION, (b->write_fn ? b->write_fn : NULL) );
     curl_easy_setopt ( ch, CURLOPT_WRITEDATA,     download_fp );
   }
   else {
-    curl_easy_setopt ( ch, CURLOPT_WRITEFUNCTION, writefunc );
+     curl_easy_setopt ( ch, CURLOPT_WRITEFUNCTION, (b->write_fn ? b->write_fn : writefunc) );
     curl_easy_setopt ( ch, CURLOPT_WRITEDATA,     b );
   }
 
@@ -1230,7 +1254,7 @@ static char* __aws_sign ( char * const str )
   unsigned char MD[256];
   unsigned len;
 
-  __debug("StrToSign:%s", str );
+  __debug("StrToSign:\n%s", str );
 
   HMAC_CTX_init(&ctx);
   HMAC_Init(&ctx, awsKey, strlen(awsKey), EVP_sha1());
@@ -1825,6 +1849,7 @@ void   aws_iobuf_append_internal (IOBuf* b,
          memcpy(wr->buf + wr->write_count, d, move);
          wr->write_count += move;
          b->write_count  += move;
+         b->avail        += move;
       }
 
       // copy remaining data into a new node, added at the tail of the list
@@ -1847,6 +1872,7 @@ void   aws_iobuf_append_internal (IOBuf* b,
       b->writing = b->last;
       b->writing->write_count = len;
       b->write_count += len;
+      b->avail       += len;
   }
 }
 
@@ -1958,16 +1984,20 @@ size_t aws_iobuf_getline   ( IOBuf * B, char * Line, size_t size )
        break;
   }
 
+  B->avail -= ln;
   return ln;
 }
 
 // aws_iobuf_getline() works a little better for binary-data, now, but will
 // still return early if it encounters '\n'.  This is better, if you know
 // you're dealing with binary data.
+//
+// TBD: Should just memmove() portions of IOBufNodes, instead of the the
+//      careful per-character loop.
 size_t aws_iobuf_get_raw   ( IOBuf * B, char * Line, size_t size )
 {
   size_t ln = 0;
-  memset ( Line, 0, size );
+  ///  memset ( Line, 0, size );
 
   if ( B->reading == NULL )
     return 0;
@@ -1990,9 +2020,31 @@ size_t aws_iobuf_get_raw   ( IOBuf * B, char * Line, size_t size )
     Line[ln++] = *(B->read_pos++);
   }
 
+  B->avail -= ln;
   return ln;
 }
 
+
+
+// install (a pointer to) a custom read-function onto the IOBuf.
+// This is called when a PUT/POST needs more data to send.
+void   aws_iobuf_readfunc  (IOBuf* b, ReadFnPtr  read_fn) {
+   b->read_fn = read_fn;
+}
+
+// install (a pointer to) a custom write-function onto the IOBuf.
+// This is called when more data is received, during a GET.
+void   aws_iobuf_writefunc (IOBuf* b, WriteFnPtr write_fn) {
+   b->write_fn = write_fn;
+}
+
+// Set chunked-transfer-encoding ON / OFF
+void aws_iobuf_chunked_transfer_encoding(IOBuf* b, int enable) {
+   if (enable)
+      b->flags |= IOBF_CTE;
+   else
+      b->flags &= ~(IOBF_CTE);
+}
 
 
 // Consolidate the contents of all internal IOBufNodes into a single
