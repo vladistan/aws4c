@@ -1,6 +1,10 @@
 #ifndef __AWS4C_H__
 #define __AWS4C_H__
 
+
+#include <curl/curl.h>
+
+
 #  ifdef __cplusplus
 extern "C" {
 #  endif
@@ -45,27 +49,41 @@ typedef enum {
 } IOBufFFlags;
 
 
-// signatures for standard libcurl readfunc / writefunc
-typedef size_t (*ReadFnPtr) ( void * ptr, size_t size, size_t nmemb, void * stream );
-typedef size_t (*WriteFnPtr)( void * ptr, size_t size, size_t nmemb, void * stream );
+// signatures for standard libcurl headerfunc / readfunc / writefunc
+// are all defined in curl.h
+#if 1
+typedef size_t (*HeaderFnPtr)(void* ptr, size_t size, size_t nitems, void* stream);
+typedef size_t (*ReadFnPtr)  (void* ptr, size_t size, size_t nmemb,  void* stream);
+typedef size_t (*WriteFnPtr) (void* ptr, size_t size, size_t nmemb,  void* stream);
+#elif 0
+typedef size_t (*HeaderFnPtr)(char* ptr, size_t size, size_t nitems, void* stream);
+typedef curl_read_callback   ReadFnPtr;
+typedef curl_write_callback  WriteFnPtr;
+#else
+typedef size_t (*HeaderFnPtr)(char* ptr, size_t size, size_t nitems, void* stream);
+#define ReadFnPtr   curl_read_callback
+#define WriteFnPtr  curl_write_callback
+#endif
 
 /// IOBuf structure
+/// NOTE: Things marked "[***]" are not cleared by aws_iobuf_reset()
 typedef struct IOBuf 
 {
    IOBufNode*  first;
    IOBufNode*  last;
+   HeaderFnPtr header_fn;     // [*] libcurl parsing the response header
 
    IOBufNode*  reading;
    char*       read_pos;
-   WriteFnPtr  write_fn;      // libcurl adding data to the IOBuf (during GET)
+   WriteFnPtr  write_fn;      // [*] libcurl adding data to the IOBuf (during GET)
 
    IOBufNode*  writing;
-   WriteFnPtr  read_fn;       // libcurl sending from the IOBuf (during PUT/POST)
+   ReadFnPtr   read_fn;       // [*] libcurl sending from the IOBuf (during PUT/POST)
 
    size_t      len;           // total storage in IOBufNode buffers (sum of len)
    size_t      write_count;   // total written data (sum of write_counts)
    size_t      avail;         // total unread-data avail for read (e.g aws_iobuf_get_raw())
-   size_t      growth_size;   // controls default growth, in aws_iobuf_append fns
+   size_t      growth_size;   // [*] controls default growth, in aws_iobuf_append fns
 
    char*       lastMod;
    char*       eTag;
@@ -76,7 +94,7 @@ typedef struct IOBuf
    char*       result;        // string for <code>, (e.g. 'Not Found')
    unsigned char flags;
 
-   void*       user_data;     // e.g. to pass extra info to a readfunc
+   void*       user_data;     // [*] e.g. to pass extra info to a readfunc
 } IOBuf;
 
 
@@ -96,8 +114,6 @@ typedef struct IOBuf
 //     AWS4C_CHECK( s3_head( my_iobuf, obj_name) );
 //     AWS4C_CHECK_OK( my_iobuf) );
 
-
-#include <curl/curl.h>
 
 
 #define AWS4C_CHECK( FUNCALL )                                          \
@@ -207,8 +223,10 @@ size_t aws_iobuf_getline( IOBuf* b, char* Line, size_t size );
 size_t aws_iobuf_get_raw( IOBuf* b, char* Line, size_t size );
 size_t aws_iobuf_get_meta(IOBuf* b, char* Line, size_t size, const char* key );
 
-void   aws_iobuf_readfunc  (IOBuf* b, ReadFnPtr  read_fn);
-void   aws_iobuf_writefunc (IOBuf* b, WriteFnPtr write_fn);
+void   aws_iobuf_headerfunc(IOBuf* b, HeaderFnPtr header_fn);
+void   aws_iobuf_readfunc  (IOBuf* b, ReadFnPtr   read_fn);
+void   aws_iobuf_writefunc (IOBuf* b, WriteFnPtr  write_fn);
+
 void   aws_iobuf_chunked_transfer_encoding(IOBuf* b, int enable);
 
 void   aws_iobuf_set_metadata( IOBuf* b, MetaNode* list);
@@ -217,6 +235,11 @@ const char* aws_metadata_get  (const MetaNode** list, const char* key);
 void        aws_metadata_set  (      MetaNode** list, const char* key, const char* value);
 void        aws_metadata_reset(      MetaNode** list);
 
+
+// your headerfunc / readfunc / writefunc might want to call the default version
+extern size_t aws_headerfunc( void* ptr, size_t size, size_t nitems, void* stream);
+extern size_t aws_readfunc  ( void* ptr, size_t size, size_t nmemb,  void* stream );
+extern size_t aws_writefunc ( void* ptr, size_t size, size_t nmemb,  void* stream );
 
 
 #  ifdef __cplusplus

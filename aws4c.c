@@ -221,7 +221,7 @@ static void __chomp ( char  * str )
 /// \param nmemb number of data memebers
 /// \param stream pointer to I/O buffer
 /// \return number of bytes processed
-static size_t writefunc ( void * ptr, size_t size, size_t nmemb, void * stream )
+size_t aws_writefunc ( void * ptr, size_t size, size_t nmemb, void * stream )
 {
   __debug ( "DATA RECV %d items of size %d ",  nmemb, size );
   aws_iobuf_append ( stream, ptr, nmemb*size );
@@ -229,7 +229,7 @@ static size_t writefunc ( void * ptr, size_t size, size_t nmemb, void * stream )
 }
 
 /// Suppress outputs to stdout
-static size_t writedummyfunc ( void * ptr, size_t size, size_t nmemb, void * stream )
+static size_t aws_writedummyfunc ( void * ptr, size_t size, size_t nmemb, void * stream )
 {
   __debug ( "writedummy -- stifling %d items of size %d ",  nmemb, size );
   return nmemb * size;
@@ -241,7 +241,7 @@ static size_t writedummyfunc ( void * ptr, size_t size, size_t nmemb, void * str
 /// \param nmemb number of data memebers
 /// \param stream pointer to I/O buffer
 /// \return number of bytes written
-static size_t readfunc ( void * ptr, size_t size, size_t nmemb, void * stream )
+size_t aws_readfunc ( void * ptr, size_t size, size_t nmemb, void * stream )
 {
   char * Ln = ptr;
   // int sz = aws_iobuf_getline ( stream, ptr, size*nmemb);
@@ -256,7 +256,7 @@ static size_t readfunc ( void * ptr, size_t size, size_t nmemb, void * stream )
 /// \param nmemb number of data memebers
 /// \param stream pointer to I/O buffer
 /// \return number of bytes processed
-static size_t header ( void * ptr, size_t size, size_t nmemb, void * stream )
+size_t aws_headerfunc ( void * ptr, size_t size, size_t nmemb, void * stream )
 {
   // __debug("header -- reading %d * %d bytes from '%s'", nmemb, size, ptr);
 
@@ -575,16 +575,23 @@ static int SQSRequest ( IOBuf *b, char * verb, char * const url )
   struct curl_slist *slist=NULL;
 
   curl_easy_setopt ( ch, CURLOPT_URL, url );
-  curl_easy_setopt ( ch, CURLOPT_HEADERDATA, b );
   curl_easy_setopt ( ch, CURLOPT_VERBOSE, debug );
   curl_easy_setopt ( ch, CURLOPT_INFILESIZE, b->len );
   curl_easy_setopt ( ch, CURLOPT_POST, 1 );
   curl_easy_setopt ( ch, CURLOPT_POSTFIELDSIZE , 0 );
-  curl_easy_setopt ( ch, CURLOPT_HEADERFUNCTION, header );
-  curl_easy_setopt ( ch, CURLOPT_WRITEFUNCTION, (b->write_fn ? b->write_fn : writefunc) );
+
+  curl_easy_setopt ( ch, CURLOPT_HEADERDATA, b );
+  curl_easy_setopt ( ch, CURLOPT_HEADERFUNCTION, (b->header_fn
+                                                  ? b->header_fn
+                                                  : aws_headerfunc) );
   curl_easy_setopt ( ch, CURLOPT_WRITEDATA, b );
-  curl_easy_setopt ( ch, CURLOPT_READFUNCTION, (b->read_fn ? b->read_fn : readfunc) );
+  curl_easy_setopt ( ch, CURLOPT_WRITEFUNCTION, (b->write_fn
+                                                 ? b->write_fn
+                                                 : aws_writefunc) );
   curl_easy_setopt ( ch, CURLOPT_READDATA, b );
+  curl_easy_setopt ( ch, CURLOPT_READFUNCTION, (b->read_fn
+                                                ? b->read_fn
+                                                : aws_readfunc) );
 
   if (S3Proxy)
      curl_easy_setopt ( ch, CURLOPT_PROXY, S3Proxy);
@@ -1058,11 +1065,14 @@ s3_do_put_or_post ( IOBuf *read_b, char * const signature,
 
   curl_easy_setopt ( ch, CURLOPT_HTTPHEADER, slist);
   curl_easy_setopt ( ch, CURLOPT_URL, Buf );
-  curl_easy_setopt ( ch, CURLOPT_HEADERFUNCTION, header );
-  curl_easy_setopt ( ch, CURLOPT_HEADERDATA, read_b ); /* keeping original code */
   curl_easy_setopt ( ch, CURLOPT_VERBOSE, debug );
   curl_easy_setopt ( ch, CURLOPT_UPLOAD, 1 );
   curl_easy_setopt ( ch, CURLOPT_FOLLOWLOCATION, 1 );
+
+  curl_easy_setopt ( ch, CURLOPT_HEADERDATA, read_b ); /* keeping original code */
+  curl_easy_setopt ( ch, CURLOPT_HEADERFUNCTION, ( read_b->header_fn
+                                                   ? *(read_b->header_fn)
+                                                   : aws_headerfunc) );
 
   if (S3Proxy)
      curl_easy_setopt ( ch, CURLOPT_PROXY, S3Proxy);
@@ -1072,38 +1082,38 @@ s3_do_put_or_post ( IOBuf *read_b, char * const signature,
   // disabled, writedummyfunc will suppress the output.  Otherwise, if
   // debugging is on, the response will go to stdout.
   if (write_b) {
+    curl_easy_setopt ( ch, CURLOPT_WRITEDATA, write_b );
     curl_easy_setopt ( ch, CURLOPT_WRITEFUNCTION, ( write_b->write_fn
                                                     ? *(write_b->write_fn)
-                                                   : writefunc) );
-    curl_easy_setopt ( ch, CURLOPT_WRITEDATA, write_b );
+                                                    : aws_writefunc) );
   }
   else if (!debug)
-    curl_easy_setopt ( ch, CURLOPT_WRITEFUNCTION, writedummyfunc );
+    curl_easy_setopt ( ch, CURLOPT_WRITEFUNCTION, aws_writedummyfunc );
 
 
   // maybe upload a file, instead of appending raw-data into the request via read_b
   if (src_fname) {
-    struct stat stat_info;
+     struct stat stat_info;
 
-    stat(src_fname, &stat_info);
-    upload_fp = fopen(src_fname, "r");
-    if (! upload_fp) {
-       fprintf(stderr, "s3_do_put_or_post, couldn't open '%s' for reading: %s\n",
-               src_fname, strerror(errno));
-      exit(1);
-    }
+     stat(src_fname, &stat_info);
+     upload_fp = fopen(src_fname, "r");
+     if (! upload_fp) {
+        fprintf(stderr, "s3_do_put_or_post, couldn't open '%s' for reading: %s\n",
+                src_fname, strerror(errno));
+        exit(1);
+     }
 
-    curl_easy_setopt ( ch, CURLOPT_READFUNCTION, (read_b->read_fn
-                                                  ? *(read_b->read_fn)
-                                                  : NULL) );
-    curl_easy_setopt ( ch, CURLOPT_READDATA, upload_fp );
-    curl_easy_setopt ( ch, CURLOPT_INFILESIZE_LARGE, (curl_off_t)stat_info.st_size);
-  }
-  else {
+     curl_easy_setopt ( ch, CURLOPT_READDATA, upload_fp );
      curl_easy_setopt ( ch, CURLOPT_READFUNCTION, (read_b->read_fn
                                                    ? *(read_b->read_fn)
-                                                   : readfunc) );
+                                                   : NULL) );
+     curl_easy_setopt ( ch, CURLOPT_INFILESIZE_LARGE, (curl_off_t)stat_info.st_size);
+  }
+  else {
      curl_easy_setopt ( ch, CURLOPT_READDATA, read_b );
+     curl_easy_setopt ( ch, CURLOPT_READFUNCTION, (read_b->read_fn
+                                                   ? *(read_b->read_fn)
+                                                   : aws_readfunc) );
 
      if (! chunked)
         curl_easy_setopt ( ch, CURLOPT_INFILESIZE, read_b->write_count );
@@ -1166,9 +1176,11 @@ s3_do_get ( IOBuf* b, char* const signature,
 
   curl_easy_setopt ( ch, CURLOPT_HTTPHEADER, slist);
   curl_easy_setopt ( ch, CURLOPT_URL, Buf );
-  curl_easy_setopt ( ch, CURLOPT_HEADERFUNCTION, header );
-  curl_easy_setopt ( ch, CURLOPT_HEADERDATA, b );
   curl_easy_setopt ( ch, CURLOPT_VERBOSE, debug );
+
+  curl_easy_setopt ( ch, CURLOPT_HEADERDATA, b );
+  curl_easy_setopt ( ch, CURLOPT_HEADERFUNCTION, (b->header_fn ? b->header_fn : aws_headerfunc) );
+
   if (S3Proxy)
      curl_easy_setopt ( ch, CURLOPT_PROXY, S3Proxy);
 
@@ -1185,12 +1197,12 @@ s3_do_get ( IOBuf* b, char* const signature,
       exit(1);
     }
 
-    curl_easy_setopt ( ch, CURLOPT_WRITEFUNCTION, (b->write_fn ? b->write_fn : NULL) );
     curl_easy_setopt ( ch, CURLOPT_WRITEDATA,     download_fp );
+    curl_easy_setopt ( ch, CURLOPT_WRITEFUNCTION, (b->write_fn ? b->write_fn : NULL) );
   }
   else {
-     curl_easy_setopt ( ch, CURLOPT_WRITEFUNCTION, (b->write_fn ? b->write_fn : writefunc) );
-    curl_easy_setopt ( ch, CURLOPT_WRITEDATA,     b );
+     curl_easy_setopt ( ch, CURLOPT_WRITEDATA,     b );
+     curl_easy_setopt ( ch, CURLOPT_WRITEFUNCTION, (b->write_fn ? b->write_fn : aws_writefunc) );
   }
 
 
@@ -1227,9 +1239,10 @@ s3_do_delete ( IOBuf *b, char * const signature,
   curl_easy_setopt ( ch, CURLOPT_CUSTOMREQUEST, "DELETE");
   curl_easy_setopt ( ch, CURLOPT_HTTPHEADER, slist);
   curl_easy_setopt ( ch, CURLOPT_URL, Buf );
-  curl_easy_setopt ( ch, CURLOPT_HEADERFUNCTION, header );
-  curl_easy_setopt ( ch, CURLOPT_HEADERDATA, b );
   curl_easy_setopt ( ch, CURLOPT_VERBOSE, debug );
+
+  curl_easy_setopt ( ch, CURLOPT_HEADERDATA, b );
+  curl_easy_setopt ( ch, CURLOPT_HEADERFUNCTION, (b->header_fn ? b->header_fn : aws_headerfunc) );
 
   if (S3Proxy)
      curl_easy_setopt ( ch, CURLOPT_PROXY, S3Proxy);
@@ -1711,7 +1724,7 @@ void iobuf_node_list_free(IOBufNode* n) {
 }
 
 /// Free IOBufNodes, and reset to pristine state.  This allows reuse of the
-/// same IOBuf, across multiple calls.  Leave growth_size intact.
+/// same IOBuf, across multiple calls.  Leave several fields intact.
 void aws_iobuf_reset(IOBuf* bf) {
 
   /// Release local contents of the IOBuf
@@ -1723,10 +1736,22 @@ void aws_iobuf_reset(IOBuf* bf) {
 
   aws_metadata_reset(&bf->meta);
 
-  /// wipe the base IOBuf clean (except for growth_size)
-  size_t growth_size = bf->growth_size;;
+  // prepare to wipe the base IOBuf clean
+  // (except for read_fn, write_fn, growth_size, user_data)
+  HeaderFnPtr header_fn   = bf->header_fn;
+  WriteFnPtr  write_fn    = bf->write_fn;
+  ReadFnPtr   read_fn     = bf->read_fn;
+  size_t      growth_size = bf->growth_size;
+  void*       user_data   = bf->user_data;
+
   memset(bf, 0, sizeof(IOBuf));
+
+  // restore fields that are not to be wiped during a reset
+  bf->header_fn   = header_fn;
+  bf->write_fn    = write_fn;
+  bf->read_fn     = read_fn;
   bf->growth_size = growth_size;
+  bf->user_data   = user_data;
 }
 
 /// Release IO Buffer, and its linked-list of IOBufNodes
@@ -1753,12 +1778,12 @@ void aws_iobuf_growth_size (IOBuf* b, size_t size)
 /// text to be included in a PUT/POST.  We allocate extra room for a
 /// terminal '0' (which we add), but we can handle binary data, as well.
 ///
-/// NOTE: This function allocates a new buffer to hold the contents of <d>,
-///       and copies <d> into there.  If you have a dynamically-allocated
-///       buffer containing data you want to add, you can avoid the copy by
-///       calling aws_iobuf_append_dynamic().  If you have a static buffer,
-///       you can add it without copying by calling
-///       aws_iobuf_append_static().
+/// NOTE: If needed, this function allocates a new buffer (IOBufNode) to
+///       hold the contents of <d>, and copies <d> into there.  If you have
+///       a dynamically-allocated buffer containing data you want to add,
+///       you can avoid the copy by calling aws_iobuf_append_dynamic().  If
+///       you have a static buffer, you can add it without copying by
+///       calling aws_iobuf_append_static().
 ///
 /// \param B     I/O buffer
 /// \param d     pointer to the data to be appended
@@ -1992,7 +2017,7 @@ size_t aws_iobuf_getline   ( IOBuf * B, char * Line, size_t size )
 // still return early if it encounters '\n'.  This is better, if you know
 // you're dealing with binary data.
 //
-// TBD: Should just memmove() portions of IOBufNodes, instead of the the
+// TBD: Should just memmove() portions of IOBufNodes, instead of this
 //      careful per-character loop.
 size_t aws_iobuf_get_raw   ( IOBuf * B, char * Line, size_t size )
 {
@@ -2025,6 +2050,11 @@ size_t aws_iobuf_get_raw   ( IOBuf * B, char * Line, size_t size )
 }
 
 
+// install (a pointer to) a custom header-function onto the IOBuf.
+// This is called to parse individual header fields in a response.
+void   aws_iobuf_headerfunc(IOBuf* b, HeaderFnPtr header_fn) {
+   b->header_fn = header_fn;
+}
 
 // install (a pointer to) a custom read-function onto the IOBuf.
 // This is called when a PUT/POST needs more data to send.
