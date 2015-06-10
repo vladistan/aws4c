@@ -59,20 +59,6 @@
   \{
 */
 
-static int    debug = 0;   /// <flag to control debugging options
-static int    useRrs = 0;  /// <Use reduced redundancy storage
-
-static char * ID       = NULL;  /// <Current ID
-static char * awsKeyID = NULL;  /// <AWS Key ID
-static char * awsKey   = NULL;  /// <AWS Key Material
-static char * S3Host   = "s3.amazonaws.com";     /// <AWS S3 host
-/// \todo Use SQSHost in SQS functions
-static char * SQSHost  = "queue.amazonaws.com";  /// <AWS SQS host
-static char * S3Proxy  = NULL;
-static char * Bucket   = NULL;
-static char * MimeType = NULL;
-static char * AccessControl = NULL;
-
 // S3Host and S3Proxy are initially static constants, but will be replaced
 // with dynamically-allocated strings.  This lets us know whether to free,
 // or not.
@@ -80,26 +66,36 @@ typedef enum {
    S3HOST_STATIC  = 0x01,
    S3PROXY_STATIC = 0x02
 } AWS4C_FLAGS;
-static int flags = (S3HOST_STATIC | S3PROXY_STATIC);
 
-typedef struct {
-   size_t offset;
-   size_t length;
-} ByteRange;
 
-ByteRange  byte_range = {0, 0}; /* resets after next GET */
 
-static int emc_compatibility = 0; /// <support EMC extended functionality
+// This is the default context.  It is used when you call the
+// non-thread-safe parameter-setting functions (e.g. aws_set_id(), or
+// s3_set_host()).  The default context is used to generate requests only
+// if you do not bind some other AWSContext to your IOBuf.  In other words,
+// if you want/need thread-safety, then use the re-entrant functions to set
+// state (e.g. aws_set_id_r(), or s3_set_host_r()), and install that
+// context into your IOBuf (i.e. with aws_iobuf_set_context()).
+
+// NOTE: This is initialized in aws_init(), by a call to aws_context_new()
+// static AWSContext* default_ctx = NULL;
+
+// NOTE: This is initialized in aws_init(), by a call to aws_context_reset_r()
+static AWSContext default_ctx;
+
+// <debug> is still global, for now.  It would take some work to thread an
+// AWSContext into all the places that call __debug()
+//
+static int debug = 0;           /// <flag to control debugging options
+
+
+
 
 // If you call aws_reuse_connections() with non-zero value, then we'll try
 // to reuse connection, instead of calling curl_easy_init() /
-// curl_easy_cleanup() in every function.  aws_reset_connection causes a
+// curl_easy_cleanup() in every function.  aws_reset_connection() causes a
 // one-time reset.  (This is useful to eliminate client-side caching which
 // may affect measure read bandwidth.)
-static int    reuse_connections = 0;
-static int    reset_connection  = 0;
-static int    inside = 0;
-CURL*         ch = NULL;
 static void   aws_curl_enter();
 static void   aws_curl_exit();
 
@@ -128,7 +124,7 @@ static void   aws_iobuf_append_internal(IOBuf* B, char* d, size_t len,
 static void   aws_iobuf_extend_internal(IOBuf* B, char* d, size_t len,
                                         int is_static);
 
-static char*  __aws_sign ( char* const str );
+static char*  __aws_sign ( char* const str, AWSContext* ctx );
 
 static void   __chomp ( char * str );
 
@@ -316,16 +312,18 @@ static char * __aws_get_iso_date ()
 #ifdef ENABLE_DUMP
 /// Dump current state
 /// \internal
-static void Dump ()
-{
+static void Dump() {
+   Dump_r(&default_ctx);
+}
+static void Dump_r(AWSContext* ctx) {
   printf ( "----------------------------------------\n");
-  printf ( "ID     : %-40s \n", ID );
-  printf ( "KeyID  : %-40s \n", awsKeyID );
-  printf ( "Key    : %-40s \n", awsKey );
-  printf ( "S3  Host   : %-40s \n", S3Host );
-  printf ( "S3  Proxy  : %-40s \n", S3Proxy );
-  printf ( "SQS Host   : %-40s \n", SQSHost );
-  printf ( "Bucket : %-40s \n", Bucket );
+  printf ( "ID         : %-40s \n", ctx->ID );
+  printf ( "KeyID      : %-40s \n", ctx->awsKeyID );
+  printf ( "Key        : %-40s \n", ctx->awsKey );
+  printf ( "S3  Host   : %-40s \n", ctx->S3Host );
+  printf ( "S3  Proxy  : %-40s \n", ctx->S3Proxy );
+  printf ( "SQS Host   : %-40s \n", ctx->SQSHost );
+  printf ( "Bucket     : %-40s \n", ctx->Bucket );
   printf ( "----------------------------------------\n");
 }
 #endif /* ENABLE_DUMP */
@@ -402,8 +400,9 @@ static char * GetStringToSign ( char *       resource,
                                 char **      date,
                                 char * const method,
                                 MetaNode*    metadata,
-                                char * const bucket,
-                                char * const file )
+                                // char * const bucket,
+                                char * const file,
+                                AWSContext*  ctx)
 {
   char  reqToSign[2048];
   char  acl[32];
@@ -419,13 +418,13 @@ static char * GetStringToSign ( char *       resource,
   * date = __aws_get_httpdate();
 
   memset ( resource, 0, resSize);
-  if ( bucket )
-    snprintf ( resource, resSize,"%s/%s", bucket, file );
+  if ( ctx->Bucket )
+    snprintf ( resource, resSize, "%s/%s", ctx->Bucket, file );
   else
-    snprintf ( resource, resSize,"%s", file );
+    snprintf ( resource, resSize, "%s", file );
 
-  if (AccessControl)
-    snprintf( acl, sizeof(acl), "x-amz-acl:%s\n", AccessControl);
+  if (ctx->AccessControl)
+    snprintf( acl, sizeof(acl), "x-amz-acl:%s\n", ctx->AccessControl);
   else
     acl[0] = 0;
 
@@ -449,15 +448,15 @@ static char * GetStringToSign ( char *       resource,
   meta[offset] = 0;
   
 
-  if (useRrs)
+  if (ctx->useRrs)
     strncpy( rrs, "x-amz-storage-class:REDUCED_REDUNDANCY\n", sizeof(rrs));  
   else
     rrs[0] = 0;
 
 
-  snprintf ( reqToSign, sizeof(reqToSign),"%s\n\n%s\n%s\n%s%s%s/%s",
+  snprintf ( reqToSign, sizeof(reqToSign), "%s\n\n%s\n%s\n%s%s%s/%s",
              method,
-             MimeType ? MimeType : "",
+             ctx->MimeType ? ctx->MimeType : "",
              *date,
              acl,
              meta,
@@ -465,10 +464,10 @@ static char * GetStringToSign ( char *       resource,
              resource );
 
   // EU: If bucket is in virtual host name, remove bucket from path
-  if (bucket && strncmp(S3Host, bucket, strlen(bucket)) == 0)
-    snprintf ( resource, resSize,"%s", file );
+  if (ctx->Bucket && strncmp(ctx->S3Host, ctx->Bucket, strlen(ctx->Bucket)) == 0)
+    snprintf ( resource, resSize, "%s", file );
 
-  return __aws_sign(reqToSign);
+  return __aws_sign(reqToSign, ctx);
 }
 
 static void __aws_urlencode ( char * src, char * dest, int nDest )
@@ -498,10 +497,114 @@ static void __aws_urlencode ( char * src, char * dest, int nDest )
 }
 
 
+
+// ---------------------------------------------------------------------------
+// AWS Context
+// ---------------------------------------------------------------------------
+
+/*!
+  \}
+*/
+/*!
+  \defgroup conf AWSContext Functions (thread-safety)
+  \{
+*/
+
+
+// For internal consumption only.  return an uniitialized new AWSContext.
+static AWSContext* aws_context_new_internal() {
+   AWSContext* ctx = (AWSContext*)malloc(sizeof(AWSContext));
+   if (!ctx) {
+      fprintf(stderr, "aws_context_new_internal: malloc failed\n");
+      return NULL;
+   }
+   return ctx;
+}
+
+void aws_context_reset() { // reset the default connection
+   aws_context_reset_r(&default_ctx);
+}
+
+// Restore original default settings in a context.
+// TBD: should close <ch>, etc?
+void aws_context_reset_r(AWSContext* ctx) {
+   *ctx = (AWSContext) {
+      .ch = NULL,
+      .reuse_connections = 0,
+      .reset_connection  = 0,
+      .inside = 0,
+
+      // .debug = 0,               /// <flag to control debugging options
+      .useRrs = 0,                 /// <Use reduced redundancy storage
+
+      .ID       = NULL,            /// <Current ID
+      .awsKeyID = NULL,            /// <AWS Key ID
+      .awsKey   = NULL,            /// <AWS Key Material
+
+      /// \todo Use SQSHost in SQS functions
+      .SQSHost  = "queue.amazonaws.com", /// <AWS SQS host
+      .S3Host   = "s3.amazonaws.com",    /// <AWS S3 host
+      .S3Proxy  = NULL,
+      .Bucket   = NULL,
+      .MimeType = NULL,
+      .AccessControl = NULL,
+
+      .byte_range = {0, 0},        /* resets automatically, after next GET */
+      .emc_compatibility = 0,      /// <support EMC extended functionality
+      .flags = (S3HOST_STATIC | S3PROXY_STATIC), /*  */
+   };
+}
+
+// allocate a new context, initialized to defaults
+AWSContext* aws_context_new() {
+   AWSContext* ctx = aws_context_new_internal();
+   aws_context_reset_r(ctx);
+   return ctx;
+}
+
+// copy the (current state of) the default context.  You could make some
+// initializations to the default context, then use that as a
+// starting-point for all your custom contexts.
+//
+// NOTE: We call aws_iobuf_reset(), because you obviously wouldn't want to
+// duplicate any default IOBufNode context into your cloned structure.
+AWSContext* aws_context_clone() {
+   return aws_context_clone_r(&default_ctx);
+}
+AWSContext* aws_context_clone_r(AWSContext* ctx) {
+   if (!ctx)
+      return NULL;
+
+   AWSContext* ctx_new = aws_context_new_internal();
+   *ctx_new = *ctx;
+   return ctx_new;
+}
+
+
+void aws_context_free_r(AWSContext* ctx) {
+   free(ctx);
+}
+
+
+// ---------------------------------------------------------------------------
+// Context get/set functions
+// ---------------------------------------------------------------------------
+
+/*!
+  \}
+*/
+/*!
+  \defgroup aws AWS-related Configuration Functions
+  \{
+*/
+
 // This affects whether AWS_CURL_ENTER() / AWS_CURL_EXIT() will use
 // curl_easy_reset() or will entirely close the curl connection.
 void aws_reuse_connections(int val) {
-   reuse_connections = val;
+   aws_reuse_connections_r(val, &default_ctx);
+}
+void aws_reuse_connections_r(int val, AWSContext* ctx) {
+   ctx->reuse_connections = val;
 }
 
 // This causes the next curl-request to reset the connection.  It causes
@@ -510,129 +613,16 @@ void aws_reuse_connections(int val) {
 // read-bandwidth.  If reuse_connections is non-zero, connections will
 // still be reused, after the one-time reset.
 void aws_reset_connection() {
-   if (inside)
-      curl_easy_setopt(ch, CURLOPT_FORBID_REUSE, 1); /* current request */
+   aws_reset_connection_r(&default_ctx);
+}
+void aws_reset_connection_r(AWSContext* ctx) {
+   if (ctx->inside)
+      curl_easy_setopt(ctx->ch, CURLOPT_FORBID_REUSE, 1); /* current request */
    else
-      reset_connection = 1;     /* next request */
-}
-
-// See also: curl_reuse_connections()
-#define     AWS_CURL_ENTER()                    \
-   aws_curl_enter(__FILE__, __LINE__)
-
-// Don't call this directly.  Use AWS_CURL_ENTER().
-static void aws_curl_enter(const char* fname, int line) {
-   __debug("aws_curl_enter: '%s', line %d\n", fname, line);
-
-   if (! ch) {
-      ch = curl_easy_init();
-      if (! ch) {
-         fprintf(stderr, "curl_easy_init failed in '%s' at line %d\n",
-                 fname, line);
-         exit(1);
-      }
-   }
-   else if (reuse_connections) {
-      curl_easy_reset(ch); // restore all options to their default state
-      if (reset_connection)
-         curl_easy_setopt(ch, CURLOPT_FRESH_CONNECT, 1);
-   }
-   else {
-
-      // Either: (1) reuse_connections was true when aws_curl_exit() was
-      // called, then was set to false, or (2) reuse_connections was false
-      // and an aws4c library-function failed to call aws_curl_exit() after
-      // calling aws_curl_enter().  Anyhow, it's false now, and we have an
-      // old handle.
-      curl_easy_cleanup(ch);
-      ch = NULL;                  /* this is safe, after curl_easy_cleanup() */
-
-      aws_curl_enter(fname, line);
-   }
-
-   inside = 1;
+      ctx->reset_connection = 1;     /* next request */
 }
 
 
-// See also: curl_reuse_connections()
-#define     AWS_CURL_EXIT()                     \
-   aws_curl_exit(__FILE__, __LINE__)
-
-// Don't call this directly.  Use AWS_CURL_EXIT().
-static void aws_curl_exit(const char* fname, int line) {
-   __debug("aws_curl_exit: '%s', line %d\n", fname, line);
-
-   assert(ch);
-
-   reset_connection = 0;        /* aws_curl_exit() implies reset was performed? */
-   inside = 0;
-}
-
-
-static int SQSRequest ( IOBuf *b, char * verb, char * const url )
-{
-   AWS_CURL_ENTER();
-  struct curl_slist *slist=NULL;
-
-  curl_easy_setopt ( ch, CURLOPT_URL, url );
-  curl_easy_setopt ( ch, CURLOPT_VERBOSE, debug );
-  curl_easy_setopt ( ch, CURLOPT_INFILESIZE, b->len );
-  curl_easy_setopt ( ch, CURLOPT_POST, 1 );
-  curl_easy_setopt ( ch, CURLOPT_POSTFIELDSIZE , 0 );
-
-  curl_easy_setopt ( ch, CURLOPT_HEADERDATA, b );
-  curl_easy_setopt ( ch, CURLOPT_HEADERFUNCTION, (b->header_fn
-                                                  ? b->header_fn
-                                                  : aws_headerfunc) );
-  curl_easy_setopt ( ch, CURLOPT_WRITEDATA, b );
-  curl_easy_setopt ( ch, CURLOPT_WRITEFUNCTION, (b->write_fn
-                                                 ? b->write_fn
-                                                 : aws_writefunc) );
-  curl_easy_setopt ( ch, CURLOPT_READDATA, b );
-  curl_easy_setopt ( ch, CURLOPT_READFUNCTION, (b->read_fn
-                                                ? b->read_fn
-                                                : aws_readfunc) );
-
-  if (S3Proxy)
-     curl_easy_setopt ( ch, CURLOPT_PROXY, S3Proxy);
-
-  int  sc  = curl_easy_perform(ch);
-  /** \todo check the return code  */
-  __debug ( "Return Code: %d ", sc );
-  
-  curl_slist_free_all(slist);
-
-  // NOTE: There was no curl_easy_cleanup() here.  Was that a bug, or was
-  //       that deliberate?  If it was a bug, then uncomment the
-  //       "AWS_CURL_EXIT()", here, and delete this comment.
-  //
-  //  AWS_CURL_EXIT();
-
-  return sc;
-}
-
-static char * SQSSign ( char * str )
-{
-  char RealSign[1024];
-  char * signature = __aws_sign(str);
-
-  __aws_urlencode ( signature, RealSign, sizeof(RealSign));
-    
-  free ( signature );
-  return strdup(RealSign);
-}
-
-
-
-/*!
-  \}
-*/
-
-
-/*!
-  \defgroup conf Configuration Functions
-  \{
-*/
 
 /// Initialize  the library.
 ///
@@ -646,9 +636,14 @@ static char * SQSSign ( char * str )
 ///    any other thread that uses these other libraries.
 ///
 CURLcode aws_init () {
-   return curl_global_init(CURL_GLOBAL_ALL);
+   CURLcode rc = curl_global_init(CURL_GLOBAL_ALL);
+   if (rc == CURLE_OK)
+      // default_ctx = aws_context_new();
+      aws_context_reset_r(&default_ctx);
+   return rc;
 }
 void     aws_cleanup () {
+   aws_context_reset_r(&default_ctx);
    curl_global_cleanup();
 }
 
@@ -661,40 +656,67 @@ void aws_set_debug (int d) {
 
 /// \brief Set AWS account ID to be read from .awsAuth file
 /// \param id new account ID
-void aws_set_id ( char * const id )     
-{ ID = ((id == NULL) ? getenv("USER") : strdup(id)); }
+void aws_set_id   ( char * const id ) {
+   aws_set_id_r(id, &default_ctx);
+}
+void aws_set_id_r ( char * const id, AWSContext* ctx ) {
+   if (ctx->ID)
+      free(ctx->ID);
+   ctx->ID = ((id == NULL) ? getenv("USER") : strdup(id));
+}
 
 /// Set AWS account access key
 /// \param key new AWS authentication key
-void aws_set_key ( char * const key )   
-{ awsKey = ((key == NULL) ? NULL : strdup(key)); }
+void aws_set_key   ( char * const key ) {
+   aws_set_key_r(key, &default_ctx);
+}
+void aws_set_key_r ( char * const key, AWSContext* ctx ) {
+   if (ctx->awsKey)
+      free(ctx->awsKey);
+   ctx->awsKey = ((key == NULL) ? NULL : strdup(key));
+}
 
 /// Set AWS account access key ID
 /// \param keyid new AWS key ID
-void aws_set_keyid ( char * const keyid ) 
-{ awsKeyID = keyid == NULL ? NULL :  strdup(keyid);}
+void aws_set_keyid   ( char * const keyid ) {
+   aws_set_keyid_r(keyid, &default_ctx);
+}
+void aws_set_keyid_r ( char * const keyid, AWSContext* ctx ) {
+   if (ctx->awsKeyID)
+      free(ctx->awsKeyID);
+   ctx->awsKeyID = ((keyid == NULL) ? NULL :  strdup(keyid));
+}
 
 /// Set reduced redundancy storage
 /// \param r  when non-zero causes puts to use RRS
-void aws_set_rrs (int r) 
-{ useRrs = r; }
+void aws_set_rrs   (int r) {
+   aws_set_rrs_r(r, &default_ctx);
+}
+void aws_set_rrs_r (int r, AWSContext* ctx) {
+   ctx->useRrs = r;
+}
 
 
 
 
 /// Read AWS authentication records
 /// \param id  user ID
-int aws_read_config ( char * const id )
-{
-  aws_set_id ( id );
-  aws_set_keyid ( NULL );
-  aws_set_key   ( NULL   );
+int aws_read_config   ( char * const id ) {
+   return aws_read_config_r(id, &default_ctx);
+}
+int aws_read_config_r ( char * const id, AWSContext* ctx ) {
+   aws_set_id_r   ( id, ctx );
+   aws_set_keyid_r( NULL, ctx );
+   aws_set_key_r  ( NULL, ctx);
 
   /// Open File
   /// Make sure that file permissions are set right
-  __debug ( "Reading Config File ID[%s]", ID );
+  __debug ( "Reading Config File ID[%s]", ctx->ID );
   FILE * f = __aws_getcfg();
-  if ( f == NULL ) { perror ("Error opening config file"); exit(1); }
+  if ( f == NULL ) {
+     perror ("Error opening config file");
+     exit(1);
+  }
   
 
   /// Read Lines
@@ -710,7 +732,7 @@ int aws_read_config ( char * const id )
     if ( line[0] == 0 ) continue;
 
     __chomp ( line );
-      
+
 
     /// Split the line on ':'
     char * keyID = strchr(line,':');
@@ -729,14 +751,14 @@ int aws_read_config ( char * const id )
       
       
     /// If the line is correct Set the IDs
-    if ( !strcmp(line,id)) {
-      aws_set_keyid ( keyID );
-      aws_set_key   ( key   );
+    if ( !strcmp(line, id)) {
+       aws_set_keyid_r ( keyID, ctx );
+       aws_set_key_r   ( key, ctx );
       break;
     }
   }
   /// Return error if not found
-  if ( awsKeyID == NULL ) {
+  if ( ctx->awsKeyID == NULL ) {
      __debug("Didn't find user %s in config-file\n", id);
      return -1;
   }
@@ -744,34 +766,34 @@ int aws_read_config ( char * const id )
   return 0;
 }
 
+
 /*!
   \}
 */
-
-
-
-
 /*!
-  \defgroup s3 S3 Interface Functions
+  \defgroup s3 S3-related Configuration Functions
   \{
 */
 
 
 /// Set S3 host
-void s3_set_host ( const char * const str ) {
+void s3_set_host   ( const char * const str ) {
+   s3_set_host_r(str, &default_ctx);
+}
+void s3_set_host_r ( const char * const str, AWSContext* ctx ) {
 
-   if (S3Host && str && !strcmp(str, S3Host))
+   if (ctx->S3Host && str && !strcmp(str, ctx->S3Host))
       return;
 
-   assert(!inside);
-   if (ch) {
-      curl_easy_cleanup(ch);
-      ch = NULL;
+   assert(!ctx->inside);
+   if (ctx->ch) {
+      curl_easy_cleanup(ctx->ch);
+      ctx->ch = NULL;
    }
-   if (S3Host && !(flags & S3HOST_STATIC))
-      free(S3Host);
-   S3Host = ((str == NULL) ? NULL :  strdup(str));
-   flags &=  ~(S3HOST_STATIC);
+   if (ctx->S3Host && !(ctx->flags & S3HOST_STATIC))
+      free(ctx->S3Host);
+   ctx->S3Host = ((str == NULL) ? NULL :  strdup(str));
+   ctx->flags &=  ~(S3HOST_STATIC);
 }
 
 /// Set S3 Proxy NOTE: libcurl allows separate specifications of proxy,
@@ -780,917 +802,90 @@ void s3_set_host ( const char * const str ) {
 /// Therefore, we only provide a way to set the proxy.
 ///
 /// Set to NULL (the default), to stop using a proxy.
-void s3_set_proxy ( const char * const str ) {
+void s3_set_proxy   ( const char * const str ) {
+   s3_set_proxy_r(str, &default_ctx);
+}
+void s3_set_proxy_r ( const char * const str, AWSContext* ctx ) {
 
-   if (S3Proxy && str && !strcmp(str, S3Proxy))
+   if (ctx->S3Proxy && str && !strcmp(str, ctx->S3Proxy))
       return;
 
-   assert(!inside);
-   if (ch) {
-      curl_easy_cleanup(ch);
-      ch = NULL;
+   assert(!ctx->inside);
+   if (ctx->ch) {
+      curl_easy_cleanup(ctx->ch);
+      ctx->ch = NULL;
    }
-   if (S3Proxy && !(flags & S3PROXY_STATIC))
-      free(S3Proxy);
-   S3Proxy = ((str == NULL) ? NULL :  strdup(str));
-   flags &=  ~(S3PROXY_STATIC);
+   if (ctx->S3Proxy && !(ctx->flags & S3PROXY_STATIC))
+      free(ctx->S3Proxy);
+   ctx->S3Proxy = ((str == NULL) ? NULL :  strdup(str));
+   ctx->flags &=  ~(S3PROXY_STATIC);
 }
+
 
 /// Select current S3 bucket
 /// \param str bucket ID
-void s3_set_bucket ( const char * const str ) 
-{ Bucket = ((str) ? strdup(str) : NULL); }
+void s3_set_bucket   ( const char * const str ) {
+   s3_set_bucket_r(str, &default_ctx);
+}
+void s3_set_bucket_r ( const char * const str,  AWSContext* ctx ) {
+   if (ctx->Bucket)
+      free(ctx->Bucket);
+   ctx->Bucket = ((str) ? strdup(str) : NULL);
+}
+
 
 /// Set S3 MimeType
-void s3_set_mime ( const char * const str )
-{ MimeType = ((str) ? strdup(str) : NULL); }
+void s3_set_mime   ( const char * const str ) {
+   s3_set_mime_r(str, &default_ctx);
+}
+void s3_set_mime_r ( const char * const str, AWSContext* ctx ) {
+   if (ctx->MimeType)
+      free(ctx->MimeType);
+   ctx->MimeType = ((str) ? strdup(str) : NULL);
+}
 
 /// Set byte-range.  NOTE: resets after the next GET, PUT, or POST.
 /// If emc-compatibility is enabled, you can use this to append to objects,
 /// or to allow parallel updates.
-void s3_set_byte_range ( size_t offset, size_t length ) {
-   byte_range.offset = offset;
-   byte_range.length = length;
+void s3_set_byte_range   ( size_t offset, size_t length ) {
+   s3_set_byte_range_r(offset, length, &default_ctx);
+}
+void s3_set_byte_range_r ( size_t offset, size_t length, AWSContext* ctx ) {
+   ctx->byte_range.offset = offset;
+   ctx->byte_range.length = length;
 }
 
 /// Set S3 AccessControl
-void s3_set_acl ( const char * const str )
-{ AccessControl = ((str) ? strdup(str) : NULL); }
+void s3_set_acl   ( const char * const str ) {
+   s3_set_acl_r(str, &default_ctx);
+}
+void s3_set_acl_r ( const char * const str, AWSContext* ctx ) {
+   if (ctx->AccessControl)
+      free(ctx->AccessControl);
+   ctx->AccessControl = ((str) ? strdup(str) : NULL);
+}
 
 
 /// EMC supports some extended functionality, such as using byte-ranges
 /// during PUT / POST, in order to write multi-parts, or to append to an
 /// object.  These operations are not allowed in "pure" S3.  You must
 /// enable EMC-compatibility in order to allow the operations.
-void s3_enable_EMC_extensions ( int value )
-{ emc_compatibility = value; }
-
-
-
-
-
-
-/// Upload the contents of <b> into object <obj_name>, under currently-selected bucket
-/// \param b          I/O buffer
-/// \param obj_name   name of the target-object (not including the bucket).
-CURLcode s3_put ( IOBuf* b, char * const obj_name )
-{
-  char * const method = "PUT";
-  char  resource [1024];
-  char * date = NULL;
-
-  char * signature = GetStringToSign ( resource, sizeof(resource), 
-                                       &date, method, b->meta, Bucket, obj_name ); 
-  CURLcode sc = s3_do_put_or_post( b, signature, date, resource, 0, NULL, NULL ); 
-  free ( signature );
-  return sc;
+void s3_enable_EMC_extensions ( int value ) {
+   s3_enable_EMC_extensions_r(value, &default_ctx);
 }
-/// Like S3_put(), but with a little more control.
-/// \param file       local file to be uploaded. (If NULL, then we assume data is in <b>.)
-/// \param response   if non-null, gets the XML response from the server.
-CURLcode s3_put2 ( IOBuf* b, char * const obj_name, char* const src_file, IOBuf* response )
-{
-  char * const method = "PUT";
-  char  resource [1024];
-  char * date = NULL;
-
-  char * signature = GetStringToSign ( resource, sizeof(resource), 
-                                       &date, method, b->meta, Bucket, obj_name ); 
-  CURLcode sc = s3_do_put_or_post( b, signature, date, resource, 0, src_file, response ); 
-  free ( signature );
-  return sc;
-}
-
-/// append to an object.  (Requires EMC-extensions to S3.)
-/// s3_do_put_or_post() will complain, if you don't have emc_compatibility enabled.
-CURLcode emc_put_append( IOBuf* b, char * const obj_name ) {
-   s3_set_byte_range(-1,-1);
-   return s3_put(b, obj_name);
-}
-CURLcode emc_put2_append ( IOBuf* b, char * const obj_name, char* const src_file, IOBuf* response ) {
-   s3_set_byte_range(-1,-1);
-   return s3_put2(b, obj_name, src_file, response);
-}
-
-
-/// like s3_put(), but with POST
-CURLcode s3_post ( IOBuf* b, char* const obj_name )
-{
-  char * const method = "POST";
-  char  resource [1024];
-  char * date = NULL;
-
-  char * signature = GetStringToSign ( resource, sizeof(resource), 
-                                       &date, method, b->meta, Bucket, obj_name ); 
-  CURLcode sc = s3_do_put_or_post( b, signature, date, resource, 1, NULL, NULL ); 
-  free ( signature );
-  return sc;
-}
-/// like s3_put2()(), but with POST
-CURLcode s3_post2 ( IOBuf* b, char* const obj_name, char* const src_file, IOBuf* response )
-{
-  char * const method = "POST";
-  char  resource [1024];
-  char * date = NULL;
-
-  char * signature = GetStringToSign ( resource, sizeof(resource), 
-                                       &date, method, b->meta, Bucket, obj_name ); 
-  CURLcode sc = s3_do_put_or_post( b, signature, date, resource, 1, src_file, response ); 
-  free ( signature );
-  return sc;
-}
-
-
-/// Download the file from the current bucket
-/// \param b I/O buffer
-/// \param file filename 
-CURLcode s3_get ( IOBuf * b, char * const obj_name )
-{
-  char * const method = "GET";
-  char  resource [1024];
-  char * date = NULL;
-
-  char * signature = GetStringToSign ( resource, sizeof(resource), 
-                                       &date, method, b->meta, Bucket, obj_name ); 
-  CURLcode sc = s3_do_get( b, signature, date, resource, 0, NULL, NULL ); 
-  free ( signature );
-  return sc;
-}
-CURLcode s3_get2 ( IOBuf * b, char * const obj_name, char* const src_file, IOBuf* response )
-{
-  char * const method = "GET";
-  char  resource [1024];
-  char * date = NULL;
-
-  char * signature = GetStringToSign ( resource, sizeof(resource), 
-                                       &date, method, b->meta, Bucket, obj_name ); 
-  CURLcode sc = s3_do_get( b, signature, date, resource, 0, src_file, response ); 
-  free ( signature );
-  return sc;
-}
-
-
-/// send a HEAD request (i.e. get obj metadata, without contents)
-CURLcode s3_head ( IOBuf * b, char * const obj_name )
-{
-  char * const method = "HEAD";
-  char  resource [1024];
-  char * date = NULL;
-
-  char * signature = GetStringToSign ( resource, sizeof(resource), 
-                                       &date, method, b->meta, Bucket, obj_name ); 
-  CURLcode sc = s3_do_get( b, signature, date, resource, 1, NULL, NULL ); 
-  free ( signature );
-  return sc;
-}
-CURLcode s3_head2 ( IOBuf * b, char * const obj_name, char* const fname, IOBuf* response )
-{
-  char * const method = "HEAD";
-  char  resource [1024];
-  char * date = NULL;
-
-  char * signature = GetStringToSign ( resource, sizeof(resource), 
-                                       &date, method, b->meta, Bucket, obj_name ); 
-  CURLcode sc = s3_do_get( b, signature, date, resource, 1, fname, response ); 
-  free ( signature );
-  return sc;
+void s3_enable_EMC_extensions_r ( int value, AWSContext* ctx ) {
+   ctx->emc_compatibility = value;
 }
 
 
 
-/// Delete the file from the currently selected bucket
-/// \param file filename
-CURLcode s3_delete ( IOBuf * b, char * const obj_name )
-{
-  char * const method = "DELETE";
-  
-  char  resource [1024];
-  char * date = NULL;
-  char * signature = GetStringToSign ( resource, sizeof(resource), 
-                                       &date, method, b->meta, Bucket, obj_name ); 
-  CURLcode sc = s3_do_delete( b, signature, date, resource ); 
-  free ( signature );
-
-  return sc;
-}
-
-
-
-/// If <post_p> is non-zero, then do a POST.  Otherwise, do a PUT.
-///
-/// If <src_fname> is provided, it is assumed to be a file for uploading.
-/// Otherwise, we assume the data is contained in <read_b>.
-///
-/// NOTE: In the case of a post with post-fields, just add them to your
-///       obj_name, in the call to s3_post(), like this:
-///
-///           s3_post(bf, "obj_name?uploads");
-///
-/// NOTE: Not sure about old PUT behavior, but, for POST, we need to receive
-///       XML from the server.  Therefore we need writefunc to write into
-///       an IOBuf.  We could reuse the one that is used by the readfunc
-///       (because the writefunc should only operate after the readfunc is
-///       complete, right?), but this seems risky and confusing.  Instead,
-///       we support a separate IOBuf, to receive server-response output
-///       from the writefunc.
-///
-// NOTE: We now allow "chunked transfer-encoding" with streaming writes.
-///      You would set up the IOBuf with a negative write-count, and
-///      install a custom readfunc().  See example in test_aws4c.c (case
-///      12)
-
-static CURLcode
-s3_do_put_or_post ( IOBuf *read_b, char * const signature, 
-                    char * const date, char * const resource,
-                    int post_p,
-                    char* src_fname, IOBuf* write_b )
-{
-  char  Buf[1024];
-  FILE* upload_fp = NULL;
-
-  AWS_CURL_ENTER();
-
-  int chunked = (read_b->flags & IOBF_CTE);
-
-  // accumulate all custom headers into <slist>
-  struct curl_slist *slist=NULL;
-  if (MimeType) {
-    snprintf ( Buf, sizeof(Buf), "Content-Type: %s", MimeType );
-    slist = curl_slist_append(slist, Buf );
-  }
-  if (AccessControl) {
-    snprintf ( Buf, sizeof(Buf), "x-amz-acl: %s", AccessControl );
-    slist = curl_slist_append(slist, Buf );
-  }
-  if (useRrs) {
-    strncpy ( Buf, "x-amz-storage-class: REDUCED_REDUNDANCY", sizeof(Buf) );
-    slist = curl_slist_append(slist, Buf );
-  }
-  if (byte_range.length) {
-     if (! emc_compatibility) {
-        fprintf(stderr, "ERROR: PUT/POST with 'byte-range' "
-                "not supported without EMC-extensions\n");
-        exit(1);
-     }
-     else if (byte_range.offset == (size_t)-1)
-        snprintf ( Buf, sizeof(Buf), "Range: bytes=-1-"); /* "append" */
-     else {
-        snprintf ( Buf, sizeof(Buf), "Range: bytes=%ld-%ld",
-                   byte_range.offset,
-                   byte_range.offset + byte_range.length -1);
-     }
-     slist = curl_slist_append(slist, Buf);
-     memset(&byte_range, 0, sizeof(ByteRange));       /* reset after each use */
-  }
-
-  snprintf ( Buf, sizeof(Buf), "Date: %s", date );
-  slist = curl_slist_append(slist, Buf );
-
-  snprintf ( Buf, sizeof(Buf), "Authorization: AWS %s:%s", awsKeyID, signature );
-  slist = curl_slist_append(slist, Buf );
-
-  // install user meta-data
-  MetaNode* meta;
-  for (meta=read_b->meta; meta; meta=meta->next) {
-     snprintf ( Buf, sizeof(Buf), "x-amz-meta-%s: %s", meta->key, meta->value );
-     slist = curl_slist_append(slist, Buf );
-  }
-
-  // sounds like CTE is supposed to be the default, if length is not
-  // provided, but we might as well be explicit.
-  if (chunked)
-     slist = curl_slist_append(slist, "Transfer-Encoding: chunked");
-
-  snprintf ( Buf, sizeof(Buf), "http://%s/%s", S3Host , resource );
-
-  curl_easy_setopt ( ch, CURLOPT_HTTPHEADER, slist);
-  curl_easy_setopt ( ch, CURLOPT_URL, Buf );
-  curl_easy_setopt ( ch, CURLOPT_VERBOSE, debug );
-  curl_easy_setopt ( ch, CURLOPT_UPLOAD, 1 );
-  curl_easy_setopt ( ch, CURLOPT_FOLLOWLOCATION, 1 );
-
-  curl_easy_setopt ( ch, CURLOPT_HEADERDATA, read_b ); /* keeping original code */
-  curl_easy_setopt ( ch, CURLOPT_HEADERFUNCTION, ( read_b->header_fn
-                                                   ? *(read_b->header_fn)
-                                                   : aws_headerfunc) );
-
-  if (S3Proxy)
-     curl_easy_setopt ( ch, CURLOPT_PROXY, S3Proxy);
-
-  // If caller provided an IOBuf to recv the response from the server,
-  // we'll arrange the writefunc to fill it.  Otherwise, if debugging is
-  // disabled, writedummyfunc will suppress the output.  Otherwise, if
-  // debugging is on, the response will go to stdout.
-  if (write_b) {
-    curl_easy_setopt ( ch, CURLOPT_WRITEDATA, write_b );
-    curl_easy_setopt ( ch, CURLOPT_WRITEFUNCTION, ( write_b->write_fn
-                                                    ? *(write_b->write_fn)
-                                                    : aws_writefunc) );
-  }
-  else if (!debug)
-    curl_easy_setopt ( ch, CURLOPT_WRITEFUNCTION, aws_writedummyfunc );
-
-
-  // maybe upload a file, instead of appending raw-data into the request via read_b
-  if (src_fname) {
-     struct stat stat_info;
-
-     stat(src_fname, &stat_info);
-     upload_fp = fopen(src_fname, "r");
-     if (! upload_fp) {
-        fprintf(stderr, "s3_do_put_or_post, couldn't open '%s' for reading: %s\n",
-                src_fname, strerror(errno));
-        exit(1);
-     }
-
-     curl_easy_setopt ( ch, CURLOPT_READDATA, upload_fp );
-     curl_easy_setopt ( ch, CURLOPT_READFUNCTION, (read_b->read_fn
-                                                   ? *(read_b->read_fn)
-                                                   : NULL) );
-     curl_easy_setopt ( ch, CURLOPT_INFILESIZE_LARGE, (curl_off_t)stat_info.st_size);
-  }
-  else {
-     curl_easy_setopt ( ch, CURLOPT_READDATA, read_b );
-     curl_easy_setopt ( ch, CURLOPT_READFUNCTION, (read_b->read_fn
-                                                   ? *(read_b->read_fn)
-                                                   : aws_readfunc) );
-
-     if (! chunked)
-        curl_easy_setopt ( ch, CURLOPT_INFILESIZE, read_b->write_count );
-  }
-
-
-  // if <post_p> is non-zero, use POST, instead of PUT
-  if (post_p) {
-    //    curl_easy_setopt ( ch, CURLOPT_POST, 1);    /* doesn't cause a POST? */
-    //    curl_easy_setopt ( ch, CURLOPT_POSTFIELDS, "uploads" ); /* DEBUGGING */
-    curl_easy_setopt(ch, CURLOPT_CUSTOMREQUEST, "POST");
-  }
-  else
-    curl_easy_setopt(ch, CURLOPT_PUT, 1);
-
-
-  CURLcode sc  = curl_easy_perform(ch);
-  __debug ( "Return Code: %d ", sc );
-  
-  curl_slist_free_all(slist);
-  if (upload_fp)
-     fclose(upload_fp);
-
-  AWS_CURL_EXIT();
-  return sc;
-}
-
-
-
-static CURLcode
-s3_do_get ( IOBuf* b, char* const signature, 
-            char* const date, char* const resource,
-            int head_p,
-            char* const dst_fname, IOBuf* response )
-{
-  char  Buf[1024];
-  FILE* download_fp = NULL;
-
-  AWS_CURL_ENTER();
-  struct curl_slist *slist=NULL;
-
-  slist = curl_slist_append(slist, "If-Modified-Since: Tue, 26 May 2009 18:58:55 GMT" );
-  slist = curl_slist_append(slist, "ETag: \"6ea58533db38eca2c2cc204b7550aab6\"");
-
-  if (byte_range.length) {
-     snprintf ( Buf, sizeof(Buf), "Range: bytes=%ld-%ld",
-                byte_range.offset,
-                byte_range.offset + byte_range.length -1);
-     slist = curl_slist_append(slist, Buf);
-     memset(&byte_range, 0, sizeof(ByteRange));       /* reset after each use */
-  }
-
-  snprintf ( Buf, sizeof(Buf), "Date: %s", date );
-  slist = curl_slist_append(slist, Buf );
-
-  snprintf ( Buf, sizeof(Buf), "Authorization: AWS %s:%s", awsKeyID, signature );
-  slist = curl_slist_append(slist, Buf );
-
-  snprintf ( Buf, sizeof(Buf), "http://%s/%s", S3Host, resource );
-
-  curl_easy_setopt ( ch, CURLOPT_HTTPHEADER, slist);
-  curl_easy_setopt ( ch, CURLOPT_URL, Buf );
-  curl_easy_setopt ( ch, CURLOPT_VERBOSE, debug );
-
-  curl_easy_setopt ( ch, CURLOPT_HEADERDATA, b );
-  curl_easy_setopt ( ch, CURLOPT_HEADERFUNCTION, (b->header_fn ? b->header_fn : aws_headerfunc) );
-
-  if (S3Proxy)
-     curl_easy_setopt ( ch, CURLOPT_PROXY, S3Proxy);
-
-  // maybe turn this into a HEAD request
-  curl_easy_setopt ( ch, CURLOPT_NOBODY, head_p );
-  curl_easy_setopt ( ch, CURLOPT_HEADER, head_p );
-
-  // maybe download to a file, instead of appending raw-data to <b>
-  if (dst_fname) {
-    download_fp = fopen(dst_fname, "w");
-    if (! download_fp) {
-       fprintf(stderr, "s3_do_get, couldn't open '%s' for writing: %s\n",
-               dst_fname, strerror(errno));
-      exit(1);
-    }
-
-    curl_easy_setopt ( ch, CURLOPT_WRITEDATA,     download_fp );
-    curl_easy_setopt ( ch, CURLOPT_WRITEFUNCTION, (b->write_fn ? b->write_fn : NULL) );
-  }
-  else {
-     curl_easy_setopt ( ch, CURLOPT_WRITEDATA,     b );
-     curl_easy_setopt ( ch, CURLOPT_WRITEFUNCTION, (b->write_fn ? b->write_fn : aws_writefunc) );
-  }
-
-
-  CURLcode sc  = curl_easy_perform(ch);
-  /** \todo check the return code  */
-  __debug ( "Return Code: %d ", sc );
-  
-  curl_slist_free_all(slist);
-  if (download_fp)
-     fclose(download_fp);
-
-  AWS_CURL_EXIT();
-  return sc;
-}
-
-
-static CURLcode
-s3_do_delete ( IOBuf *b, char * const signature, 
-               char * const date, char * const resource )
-{
-  char Buf[1024];
-
-  AWS_CURL_ENTER();
-  struct curl_slist *slist=NULL;
-
-
-  snprintf ( Buf, sizeof(Buf), "Date: %s", date );
-  slist = curl_slist_append(slist, Buf );
-  snprintf ( Buf, sizeof(Buf), "Authorization: AWS %s:%s", awsKeyID, signature );
-  slist = curl_slist_append(slist, Buf );
-
-  snprintf ( Buf, sizeof(Buf), "http://%s/%s", S3Host, resource );
-
-  curl_easy_setopt ( ch, CURLOPT_CUSTOMREQUEST, "DELETE");
-  curl_easy_setopt ( ch, CURLOPT_HTTPHEADER, slist);
-  curl_easy_setopt ( ch, CURLOPT_URL, Buf );
-  curl_easy_setopt ( ch, CURLOPT_VERBOSE, debug );
-
-  curl_easy_setopt ( ch, CURLOPT_HEADERDATA, b );
-  curl_easy_setopt ( ch, CURLOPT_HEADERFUNCTION, (b->header_fn ? b->header_fn : aws_headerfunc) );
-
-  if (S3Proxy)
-     curl_easy_setopt ( ch, CURLOPT_PROXY, S3Proxy);
-
-  CURLcode sc  = curl_easy_perform(ch);
-  /** \todo check the return code  */
-  __debug ( "Return Code: %d ", sc );
-
-  
-  curl_slist_free_all(slist);
-  AWS_CURL_EXIT();
-
-  return sc;
-}
-
-
-
-
-static char* __aws_sign ( char * const str )
-{
-  HMAC_CTX ctx;
-  unsigned char MD[256];
-  unsigned len;
-
-  __debug("StrToSign:\n%s", str );
-
-  HMAC_CTX_init(&ctx);
-  HMAC_Init(&ctx, awsKey, strlen(awsKey), EVP_sha1());
-  HMAC_Update(&ctx,(unsigned char*)str, strlen(str));
-  HMAC_Final(&ctx,(unsigned char*)MD,&len);
-  HMAC_CTX_cleanup(&ctx);
-
-  char * b64 = __b64_encode (MD,len);
-  __debug("Signature:  %s", b64 );
-
-  return b64;
-}
-/*!
-  \}
-*/
-
-
-
-#define SQS_REQ_TAIL   "&Signature=%s" "&SignatureVersion=1" "&Timestamp=%s" "&Version=2009-02-01"
-/*!
-  \defgroup sqs SQS Interface Functions
-  \{
-*/
-
-
-/// Create SQS queue
-/// \param b I/O buffer
-/// \param name queue name
-/// \return on success return 0, otherwise error code
-int sqs_create_queue ( IOBuf *b, char * const name )
-{
-  __debug ( "Creating Que: %s\n", name );
-
-  char  resource [1024];
-  char  customSign [1024];
-  char * date = NULL;
-  char * signature = NULL;
-  
-  char * Req = 
-    "http://%s/"
-    "?Action=CreateQueue"
-    "&QueueName=%s"
-    "&AWSAccessKeyId=%s"
-    SQS_REQ_TAIL ;
-
-  char * Sign = "ActionCreateQueue"
-                "AWSAccessKeyId%s"
-                "QueueName%s"
-                "SignatureVersion1"
-                "Timestamp%sVersion2009-02-01";
-
-  date = __aws_get_iso_date  ();
-  snprintf ( customSign, sizeof(customSign), Sign, awsKeyID, name, date );
-  signature =  SQSSign ( customSign );
-
-  snprintf ( resource, sizeof(resource), SQSHost, Req , name, awsKeyID, signature, date );
-
-  int sc = SQSRequest( b, "POST", resource ); 
-  free ( signature );
-  return sc;
-
-}
-
-/// Retrieve URL of the queue
-/// \param b I/O buffer
-/// \param prefix queue prefix. better use the whole name
-/// \return on success return 0, otherwise error code
-///
-/// URL is placed into the I/O buffer. User get_line to retrieve it
-int sqs_list_queues ( IOBuf *b, char * const prefix )
-{
-  __debug ( "Listing Queues PFX: %s\n", prefix );
-
-  char  resource [1024];
-  char  customSign [1024];
-  char * date = NULL;
-  char * signature = NULL;
-  
-  char * Req = 
-    "http://%s/"
-    "?Action=ListQueues"
-    "&QueueNamePrefix=%s"
-    "&AWSAccessKeyId=%s"
-      SQS_REQ_TAIL ;
-
-  char * Sign = "ActionListQueues"
-                "AWSAccessKeyId%s"
-                "QueueNamePrefix%s"
-                "SignatureVersion1"
-                "Timestamp%sVersion2009-02-01";
-
-  date = __aws_get_iso_date  ();
-  snprintf ( customSign, sizeof(customSign), Sign, awsKeyID, prefix, date );
-  signature =  SQSSign ( customSign );
-
-  snprintf ( resource, sizeof(resource), Req , SQSHost , prefix, awsKeyID,
-             signature, date );
-
-  IOBuf *nb = aws_iobuf_new();
-  int sc = SQSRequest( nb, "POST", resource ); 
-  free ( signature );
-
-  if ( nb->result != NULL )
-    b-> result = strdup(nb->result);
-  b-> code   = nb->code;
-
-  /// \todo This only retrieves just one line in the string..
-  ///       make that all URLs are returned
-
-  if ( b->code == 200 ) {
-    /// Parse Out the List Of Queues
-    while(-1) {
-      char Ln[1024];
-      aws_iobuf_getline ( nb, Ln, sizeof(Ln));
-      if ( Ln[0] == 0 ) break;
-      char *q = strstr ( Ln, "<QueueUrl>" );
-      if ( q != 0 ) {
-        q += 10;
-        char * end = NULL;
-        end = strstr ( q, "</QueueUrl>" );
-        if ( *end != 0 ) {
-          * end = 0;
-          aws_iobuf_append ( b, q, strlen(q ));
-          aws_iobuf_append ( b, "\n", 1 );
-        }
-      }
-    }      
-  }
-  aws_iobuf_free ( nb );
-
-  return sc;
-}
-
-
-/// Retrieve queue attributes
-/// \param b I/O buffer
-/// \param url queue url. Use sqs_list_queues to retrieve
-/// \param timeOut queue visibility timeout
-/// \param nMesg   approximate number of messages in the queue
-/// \return on success return 0, otherwise error code
-int sqs_get_queueattributes ( IOBuf *b, char * url, int *timeOut, int *nMesg )
-{
-  __debug ( "Getting Que Attributes\n" );
-
-  char  resource [1024];
-  char  customSign [1024];
-  char * date = NULL;
-  char * signature = NULL;
-
-  char * Req = 
-    "%s/"
-    "?Action=GetQueueAttributes"
-    "&AttributeName.1=VisibilityTimeout"
-    "&AttributeName.2=ApproximateNumberOfMessages"
-    "&AWSAccessKeyId=%s"
-    SQS_REQ_TAIL ;
-
-  char * Sign = 
-    "ActionGetQueueAttributes"
-    "AttributeName.1VisibilityTimeout"
-    "AttributeName.2ApproximateNumberOfMessages"
-    "AWSAccessKeyId%s"
-    "SignatureVersion1"
-    "Timestamp%s"
-    "Version2009-02-01";
-
-  date = __aws_get_iso_date  ();
-  snprintf ( customSign, sizeof(customSign), Sign, awsKeyID, date );
-  signature =  SQSSign ( customSign );
-
-  snprintf ( resource, sizeof(resource), Req , url, awsKeyID, signature, date );
-
-  const char *pfxVisTO = "<Name>VisibilityTimeout</Name><Value>";
-  const char *pfxQLen  = "<Name>ApproximateNumberOfMessages</Name><Value>";
-
-
-  int sc = SQSRequest( b, "POST", resource ); 
-  while(-1) 
-    {
-      char Ln[1024];
-      aws_iobuf_getline ( b, Ln, sizeof(Ln));
-      if ( Ln[0] == 0 ) break;
-      
-      char *q;
-      q = strstr ( Ln, pfxVisTO );
-      if ( q != 0 ) { *timeOut = atoi(q+strlen(pfxVisTO));  }
-      q = strstr ( Ln, pfxQLen );
-      if ( q != 0 ) { *nMesg = atoi(q+strlen(pfxQLen));  }
-    }
-
-  free ( signature );
-  return sc;
-}
-
-/// Set queue visibility timeout
-/// \param b I/O buffer
-/// \param url queue url. Use sqs_list_queues to retrieve
-/// \param sec queue visibility timeout
-/// \return on success return 0, otherwise error code
-int sqs_set_queuevisibilitytimeout ( IOBuf *b, char * url, int sec )
-{
-  __debug ( "Setting Visibility Timeout : %d\n", sec );
-
-  char  resource [1024];
-  char  customSign [1024];
-  char * date = NULL;
-  char * signature = NULL;
-
-  char * Req = 
-    "%s/"
-    "?Action=SetQueueAttributes"
-    "&Attribute.1.Name=VisibilityTimeout"
-    "&Attribute.1.Value=%d"
-    "&AWSAccessKeyId=%s"
-    SQS_REQ_TAIL ;
-
-  char * Sign = 
-    "ActionSetQueueAttributes"
-    "Attribute.1.NameVisibilityTimeout"
-    "Attribute.1.Value%d"
-    "AWSAccessKeyId%s"
-    "SignatureVersion1"
-    "Timestamp%s"
-    "Version2009-02-01";
-
-  date = __aws_get_iso_date  ();
-  snprintf ( customSign, sizeof(customSign), Sign, sec, awsKeyID, date );
-  signature =  SQSSign ( customSign );
-
-  snprintf ( resource, sizeof(resource), Req , 
-             url, sec, awsKeyID, signature, date );
-
-  int sc = SQSRequest( b, "POST", resource ); 
-  free ( signature );
-  return sc;
-}
-
-/// Send a message to the queue
-/// \param b I/O buffer
-/// \param url queue url. Use sqs_list_queues to retrieve
-/// \param msg a message to send
-/// \return on success return 0, otherwise error code
-int sqs_send_message ( IOBuf *b, char * const url, char * const msg )
-{
-  __debug ( "Sending Message to the queue %s\n[%s]",
-            url, msg );
-
-  char  resource [10900];
-  char  customSign [10900];
-  char * date = NULL;
-  char * signature = NULL;
-  char  encodedMsg[8192];
-
-  __aws_urlencode ( msg, encodedMsg, sizeof(encodedMsg));
-  __debug ( "Encoded MSG %s", encodedMsg );
-
-  char * Req = 
-    "%s/"
-    "?Action=SendMessage"
-    "&MessageBody=%s"
-    "&AWSAccessKeyId=%s"
-    SQS_REQ_TAIL ;
-
-  char * Sign = 
-    "ActionSendMessage"
-    "AWSAccessKeyId%s"
-    "MessageBody%s"
-    "SignatureVersion1"
-    "Timestamp%s"
-    "Version2009-02-01";
-
-  date = __aws_get_iso_date  ();
-  snprintf ( customSign, sizeof(customSign), Sign, awsKeyID, msg, date );
-  signature =  SQSSign ( customSign );
-
-  snprintf ( resource, sizeof(resource), Req , 
-             url, encodedMsg, awsKeyID, signature, date );
-
-  int sc = SQSRequest( b, "POST", resource ); 
-  free ( signature );
-  return sc;
-}
-
-/// Retrieve a message from the queue
-/// \param b I/O buffer
-/// \param url queue url. Use sqs_list_queues to retrieve
-/// \param id Message receipt handle. 
-/// \return on success return 0, otherwise error code
-///
-/// Message contents are placed into I/O buffer
-/// Caller has to allocate enough memory for the receipt handle 
-/// 1024 bytes should be enough
-int sqs_get_message ( IOBuf * b, char * const url, char * id  )
-{
-  __debug ( "Retieving message from: %s", url );
-
-  char  resource [10900];
-  char  customSign [10900];
-  char * date = NULL;
-  char * signature = NULL;
-
-  char * Req = 
-    "%s/"
-    "?Action=ReceiveMessage"
-    "&AWSAccessKeyId=%s"
-    SQS_REQ_TAIL ;
-
-  char * Sign = 
-    "ActionReceiveMessage"
-    "AWSAccessKeyId%s"
-    "SignatureVersion1"
-    "Timestamp%s"
-    "Version2009-02-01";
-
-  date = __aws_get_iso_date  ();
-  snprintf ( customSign, sizeof(customSign), Sign, awsKeyID, date );
-  signature =  SQSSign ( customSign );
-
-  snprintf ( resource, sizeof(resource), Req , 
-             url, awsKeyID, signature, date );
-  free ( signature );
-
-  IOBuf * bf = aws_iobuf_new();
-  int sc = SQSRequest( bf, "POST", resource ); 
-
-  b->code = bf->code;
-  b->result = strdup(bf->result);
-  
-  if ( bf->code != 200 ) {
-    aws_iobuf_free(bf);
-    return sc;
-  }
-
-  /// \todo This is really bad. Must get a real message parser
-  int inBody = 0;
-  while(-1) {
-    char Ln[1024];
-    aws_iobuf_getline ( bf, Ln, sizeof(Ln));
-    if ( Ln[0] == 0 ) break;
-
-    __debug ( "%s|%s|", inBody ? ">>": "", Ln );
-
-    char *q;
-    char *e;
-
-    /// Handle a body already being processed..
-    if ( inBody ) {
-      e = strstr ( Ln, "</Body>" );
-      if ( e ) { *e = 0; inBody = 0; }
-      aws_iobuf_append (b, Ln, strlen(Ln));
-      if ( ! inBody ) break;
-      continue;     
-    }
-
-    q = strstr ( Ln, "<ReceiptHandle>" );
-    if ( q != 0 ) {
-      q += 15;
-      e = strstr ( Ln, "</ReceiptHandle>" );
-      *e = 0;
-      strcpy ( id, q );
-      q = e+1;
-      q = strstr ( q, "<Body>" );
-      if ( q != 0 ) {
-        q += 6;
-        e = strstr ( q, "</Body>" );
-        if ( e ) *e = 0; else inBody = 1;
-        aws_iobuf_append (b, q, strlen(q));
-      }
-    }
-  }
-     
-
-  return sc;
-}
-
-/// Delete processed message from the queue
-/// \param bf I/O buffer
-/// \param url queue url. Use sqs_list_queues to retrieve
-/// \param receipt Message receipt handle. 
-/// \return on success return 0, otherwise error code
-///
-int sqs_delete_message ( IOBuf * bf, char * const url, char * receipt )
-{
-  char  resource [10900];
-  char  customSign [10900];
-  char * date = NULL;
-  char * signature = NULL;
-
-  char * Req = 
-    "%s/"
-    "?Action=DeleteMessage"
-    "&ReceiptHandle=%s"
-    "&AWSAccessKeyId=%s"
-      SQS_REQ_TAIL ;
-
-  char * Sign = 
-    "ActionDeleteMessage"
-    "AWSAccessKeyId%s"
-    "ReceiptHandle%s"
-    "SignatureVersion1"
-    "Timestamp%s"
-    "Version2009-02-01";
-
-  date = __aws_get_iso_date  ();
-  snprintf ( customSign, sizeof(customSign), Sign, awsKeyID, receipt, date );
-  signature =  SQSSign ( customSign );
-
-  char encReceipt[1024];
-  __aws_urlencode ( receipt, encReceipt, sizeof(encReceipt));
-
-  snprintf ( resource, sizeof(resource), Req , url, encReceipt, awsKeyID, signature, date );
-  free ( signature );
-
-  int sc = SQSRequest( bf, "POST", resource ); 
-  return sc;
-}
+// ---------------------------------------------------------------------------
+// IOBuf
+// ---------------------------------------------------------------------------
 
 /*!
   \}
 */
-
-
-
 /*!
   \defgroup iobuf I/O Buffer functions
   \{
@@ -1698,12 +893,11 @@ int sqs_delete_message ( IOBuf * bf, char * const url, char * receipt )
 
 /// Create a new I/O buffer
 /// \return a newly allocated I/O buffer
-IOBuf * aws_iobuf_new ()
-{
-  IOBuf * bf = malloc(sizeof(IOBuf));
-  memset(bf, 0, sizeof(IOBuf));
+IOBuf* aws_iobuf_new() {
+   IOBuf* bf = (IOBuf*)malloc(sizeof(IOBuf));
+   memset(bf, 0, sizeof(IOBuf));
 
-  return bf;
+   return bf;
 }
 
 
@@ -1723,8 +917,10 @@ void iobuf_node_list_free(IOBufNode* n) {
    }
 }
 
-/// Free IOBufNodes, and reset to pristine state.  This allows reuse of the
-/// same IOBuf, across multiple calls.  Leave several fields intact.
+/// Free IOBufNodes, and reset related fields to pristine state.  This allows reuse of the
+/// same IOBuf, across multiple calls.  Some other fields are left intact.  The idea is
+// that these are fields one would want preserved, when just resetting the
+// read/write-related state.
 void aws_iobuf_reset(IOBuf* bf) {
 
   /// Release local contents of the IOBuf
@@ -1743,6 +939,7 @@ void aws_iobuf_reset(IOBuf* bf) {
   ReadFnPtr   read_fn     = bf->read_fn;
   size_t      growth_size = bf->growth_size;
   void*       user_data   = bf->user_data;
+  AWSContext* ctx         = bf->context;
 
   memset(bf, 0, sizeof(IOBuf));
 
@@ -1752,14 +949,23 @@ void aws_iobuf_reset(IOBuf* bf) {
   bf->read_fn     = read_fn;
   bf->growth_size = growth_size;
   bf->user_data   = user_data;
+  bf->context     = ctx;
 }
 
+// Some fields are left untouched by aws_iobuf_reset().
+void aws_iobuf_reset_hard(IOBuf* b) {
+   aws_iobuf_reset(b);
+   aws_context_free_r(b->context);
+   memset(b, 0, sizeof(IOBuf));
+}
+
+
 /// Release IO Buffer, and its linked-list of IOBufNodes
-/// \param  bf I/O buffer to be deleted
-void   aws_iobuf_free ( IOBuf * bf )
+/// \param  b I/O buffer to be deleted
+void   aws_iobuf_free ( IOBuf * b )
 { 
-  aws_iobuf_reset(bf);
-  free (bf);
+  aws_iobuf_reset_hard(b);
+  free (b);
 }
 
 
@@ -1902,12 +1108,12 @@ void   aws_iobuf_append_internal (IOBuf* b,
 }
 
 
-// ---------------------------------------------------------------------------
+// ...........................................................................
 // "extend" functions.  These are for adding empty storage to an IOBuf.
 // This space will receive data during future writes (e.g. during a GET).
 // In order to add actual data (e.g. for a PUT), see the "append"
 // functions.
-// ---------------------------------------------------------------------------
+// ...........................................................................
 
 void   aws_iobuf_extend_static (IOBuf* b,
                                 char*  d,
@@ -2076,6 +1282,16 @@ void aws_iobuf_chunked_transfer_encoding(IOBuf* b, int enable) {
       b->flags &= ~(IOBF_CTE);
 }
 
+// Not sure whether we should free the old context here.  What if it's
+// something someone is re-using.  Please never install the default
+// context!  (Use aws_context_clone(), or something).
+void   aws_iobuf_context (IOBuf* b, AWSContext* ctx) {
+   assert(ctx != &default_ctx);
+   //   if (b->context)
+   //      aws_context_free_r(b->context);
+   b->context = ctx;
+}
+
 
 // Consolidate the contents of all internal IOBufNodes into a single
 // IOBufNode.  This allows you to see the storage as a single contiguous
@@ -2194,6 +1410,1049 @@ void aws_metadata_reset(MetaNode** list) {
    }
    *list=NULL;
 }
+
+
+
+
+
+// ---------------------------------------------------------------------------
+// requests
+// ---------------------------------------------------------------------------
+
+/*!
+  \}
+*/
+/*!
+  \defgroup api Functions for Generating Requests
+  \{
+*/
+
+// See also: curl_reuse_connections()
+#define     AWS_CURL_ENTER(CTX)                 \
+   aws_curl_enter(__FILE__, __LINE__, (CTX))
+
+// Don't call this directly.  Use AWS_CURL_ENTER().
+static void aws_curl_enter(const char* fname, int line, AWSContext* ctx) {
+   __debug("aws_curl_enter: '%s', line %d\n", fname, line);
+
+   if (! ctx->ch) {
+      ctx->ch = curl_easy_init();
+      if (! ctx->ch) {
+         fprintf(stderr, "curl_easy_init failed in '%s' at line %d\n",
+                 fname, line);
+         exit(1);
+      }
+   }
+   else if (ctx->reuse_connections) {
+      curl_easy_reset(ctx->ch); // restore all options to their default state
+      if (ctx->reset_connection)
+         curl_easy_setopt(ctx->ch, CURLOPT_FRESH_CONNECT, 1);
+   }
+   else {
+      // Either: (1) reuse_connections was true when aws_curl_exit() was
+      // called, then was set to false, or (2) reuse_connections was false
+      // and an aws4c library-function failed to call aws_curl_exit() after
+      // calling aws_curl_enter().  Anyhow, it's false now, and we have an
+      // old handle.
+      curl_easy_cleanup(ctx->ch);
+      ctx->ch = NULL;                  /* this is safe, after curl_easy_cleanup() */
+
+      aws_curl_enter(fname, line, ctx);
+   }
+
+   ctx->inside = 1;
+}
+
+
+// See also: curl_reuse_connections()
+#define     AWS_CURL_EXIT(CTX)                  \
+   aws_curl_exit(__FILE__, __LINE__, (CTX))
+
+// Don't call this directly.  Use AWS_CURL_EXIT().
+static void aws_curl_exit(const char* fname, int line, AWSContext* ctx) {
+   __debug("aws_curl_exit: '%s', line %d\n", fname, line);
+
+   assert(ctx->ch);
+
+   ctx->reset_connection = 0; /* aws_curl_exit() implies reset was performed? */
+   ctx->inside = 0;
+}
+
+
+static int SQSRequest ( IOBuf *b, char * verb, char * const url )
+{
+   AWSContext* ctx = (b->context ? b->context : &default_ctx);
+   AWS_CURL_ENTER(ctx);
+   CURL*       ch  = ctx->ch;
+
+  struct curl_slist *slist=NULL;
+
+  curl_easy_setopt ( ch, CURLOPT_URL, url );
+  curl_easy_setopt ( ch, CURLOPT_VERBOSE, debug );
+  curl_easy_setopt ( ch, CURLOPT_INFILESIZE, b->len );
+  curl_easy_setopt ( ch, CURLOPT_POST, 1 );
+  curl_easy_setopt ( ch, CURLOPT_POSTFIELDSIZE , 0 );
+
+  curl_easy_setopt ( ch, CURLOPT_HEADERDATA, b );
+  curl_easy_setopt ( ch, CURLOPT_HEADERFUNCTION, (b->header_fn
+                                                  ? b->header_fn
+                                                  : aws_headerfunc) );
+  curl_easy_setopt ( ch, CURLOPT_WRITEDATA, b );
+  curl_easy_setopt ( ch, CURLOPT_WRITEFUNCTION, (b->write_fn
+                                                 ? b->write_fn
+                                                 : aws_writefunc) );
+  curl_easy_setopt ( ch, CURLOPT_READDATA, b );
+  curl_easy_setopt ( ch, CURLOPT_READFUNCTION, (b->read_fn
+                                                ? b->read_fn
+                                                : aws_readfunc) );
+
+  if (ctx->S3Proxy)
+     curl_easy_setopt ( ch, CURLOPT_PROXY, ctx->S3Proxy);
+
+  int  sc  = curl_easy_perform(ch);
+  /** \todo check the return code  */
+  __debug ( "Return Code: %d ", sc );
+  
+  curl_slist_free_all(slist);
+
+  // NOTE: There was no curl_easy_cleanup() here.  Was that a bug, or was
+  //       that deliberate?  If it was a bug, then uncomment the
+  //       "AWS_CURL_EXIT()", here, and delete this comment.
+  //
+  //  AWS_CURL_EXIT(ctx);
+
+  return sc;
+}
+
+static char * SQSSign ( char * str, AWSContext* ctx )
+{
+  char RealSign[1024];
+  char * signature = __aws_sign(str, ctx);
+
+  __aws_urlencode ( signature, RealSign, sizeof(RealSign));
+    
+  free ( signature );
+  return strdup(RealSign);
+}
+
+
+
+
+
+/// Upload the contents of <b> into object <obj_name>, under currently-selected bucket
+/// \param b          I/O buffer
+/// \param obj_name   name of the target-object (not including the bucket).
+CURLcode s3_put ( IOBuf* b, char * const obj_name )
+{
+   AWSContext* ctx = (b->context ? b->context : &default_ctx);
+
+  char * const method = "PUT";
+  char  resource [1024];
+  char * date = NULL;
+
+  char * signature = GetStringToSign ( resource, sizeof(resource), 
+                                       &date, method, b->meta, obj_name, ctx );
+  CURLcode sc = s3_do_put_or_post( b, signature, date, resource, 0, NULL, NULL ); 
+  free ( signature );
+  return sc;
+}
+/// Like S3_put(), but with a little more control.
+/// \param file       local file to be uploaded. (If NULL, then we assume data is in <b>.)
+/// \param response   if non-null, gets the XML response from the server.
+CURLcode s3_put2 ( IOBuf* b, char * const obj_name, char* const src_file, IOBuf* response )
+{
+   AWSContext* ctx = (b->context ? b->context : &default_ctx);
+
+  char * const method = "PUT";
+  char  resource [1024];
+  char * date = NULL;
+
+  char * signature = GetStringToSign ( resource, sizeof(resource), 
+                                       &date, method, b->meta, obj_name, ctx ); 
+  CURLcode sc = s3_do_put_or_post( b, signature, date, resource, 0, src_file, response ); 
+  free ( signature );
+  return sc;
+}
+
+/// append to an object.  (Requires EMC-extensions to S3.)
+/// s3_do_put_or_post() will complain, if you don't have emc_compatibility enabled.
+CURLcode emc_put_append( IOBuf* b, char * const obj_name ) {
+   AWSContext* ctx = (b->context ? b->context : &default_ctx);
+
+   s3_set_byte_range_r(-1, -1, ctx);
+   return s3_put(b, obj_name);
+}
+CURLcode emc_put2_append ( IOBuf* b, char * const obj_name, char* const src_file, IOBuf* response ) {
+   AWSContext* ctx = (b->context ? b->context : &default_ctx);
+
+   s3_set_byte_range_r(-1, -1, ctx);
+   return s3_put2(b, obj_name, src_file, response);
+}
+
+
+/// like s3_put(), but with POST
+CURLcode s3_post ( IOBuf* b, char* const obj_name )
+{
+   AWSContext* ctx = (b->context ? b->context : &default_ctx);
+
+  char * const method = "POST";
+  char  resource [1024];
+  char * date = NULL;
+
+  char * signature = GetStringToSign ( resource, sizeof(resource), 
+                                       &date, method, b->meta, obj_name, ctx ); 
+  CURLcode sc = s3_do_put_or_post( b, signature, date, resource, 1, NULL, NULL ); 
+  free ( signature );
+  return sc;
+}
+/// like s3_put2()(), but with POST
+CURLcode s3_post2 ( IOBuf* b, char* const obj_name, char* const src_file, IOBuf* response )
+{
+   AWSContext* ctx = (b->context ? b->context : &default_ctx);
+
+  char * const method = "POST";
+  char  resource [1024];
+  char * date = NULL;
+
+  char * signature = GetStringToSign ( resource, sizeof(resource), 
+                                       &date, method, b->meta, obj_name, ctx ); 
+  CURLcode sc = s3_do_put_or_post( b, signature, date, resource, 1, src_file, response ); 
+  free ( signature );
+  return sc;
+}
+
+
+/// Download the file from the current bucket
+/// \param b I/O buffer
+/// \param file filename 
+CURLcode s3_get ( IOBuf * b, char * const obj_name )
+{
+   AWSContext* ctx = (b->context ? b->context : &default_ctx);
+
+  char * const method = "GET";
+  char  resource [1024];
+  char * date = NULL;
+
+  char * signature = GetStringToSign ( resource, sizeof(resource), 
+                                       &date, method, b->meta, obj_name, ctx ); 
+  CURLcode sc = s3_do_get( b, signature, date, resource, 0, NULL, NULL ); 
+  free ( signature );
+  return sc;
+}
+CURLcode s3_get2 ( IOBuf * b, char * const obj_name, char* const src_file, IOBuf* response )
+{
+   AWSContext* ctx = (b->context ? b->context : &default_ctx);
+
+  char * const method = "GET";
+  char  resource [1024];
+  char * date = NULL;
+
+  char * signature = GetStringToSign ( resource, sizeof(resource), 
+                                       &date, method, b->meta, obj_name, ctx ); 
+  CURLcode sc = s3_do_get( b, signature, date, resource, 0, src_file, response ); 
+  free ( signature );
+  return sc;
+}
+
+
+/// send a HEAD request (i.e. get obj metadata, without contents)
+CURLcode s3_head ( IOBuf * b, char * const obj_name )
+{
+   AWSContext* ctx = (b->context ? b->context : &default_ctx);
+
+  char * const method = "HEAD";
+  char  resource [1024];
+  char * date = NULL;
+
+  char * signature = GetStringToSign ( resource, sizeof(resource), 
+                                       &date, method, b->meta, obj_name, ctx ); 
+  CURLcode sc = s3_do_get( b, signature, date, resource, 1, NULL, NULL ); 
+  free ( signature );
+  return sc;
+}
+CURLcode s3_head2 ( IOBuf * b, char * const obj_name, char* const fname, IOBuf* response )
+{
+   AWSContext* ctx = (b->context ? b->context : &default_ctx);
+
+  char * const method = "HEAD";
+  char  resource [1024];
+  char * date = NULL;
+
+  char * signature = GetStringToSign ( resource, sizeof(resource), 
+                                       &date, method, b->meta, obj_name, ctx ); 
+  CURLcode sc = s3_do_get( b, signature, date, resource, 1, fname, response ); 
+  free ( signature );
+  return sc;
+}
+
+
+
+/// Delete the file from the currently selected bucket
+/// \param file filename
+CURLcode s3_delete ( IOBuf * b, char * const obj_name )
+{
+   AWSContext* ctx = (b->context ? b->context : &default_ctx);
+
+  char * const method = "DELETE";
+  
+  char  resource [1024];
+  char * date = NULL;
+  char * signature = GetStringToSign ( resource, sizeof(resource), 
+                                       &date, method, b->meta, obj_name, ctx ); 
+  CURLcode sc = s3_do_delete( b, signature, date, resource ); 
+  free ( signature );
+
+  return sc;
+}
+
+
+
+/// If <post_p> is non-zero, then do a POST.  Otherwise, do a PUT.
+///
+/// If <src_fname> is provided, it is assumed to be a file for uploading.
+/// Otherwise, we assume the data is contained in <read_b>.
+///
+/// NOTE: In the case of a post with post-fields, just add them to your
+///       obj_name, in the call to s3_post(), like this:
+///
+///           s3_post(bf, "obj_name?uploads");
+///
+/// NOTE: Not sure about old PUT behavior, but, for POST, we need to receive
+///       XML from the server.  Therefore we need writefunc to write into
+///       an IOBuf.  We could reuse the one that is used by the readfunc
+///       (because the writefunc should only operate after the readfunc is
+///       complete, right?), but this seems risky and confusing.  Instead,
+///       we support a separate IOBuf, to receive server-response output
+///       from the writefunc.
+///
+// NOTE: We now allow "chunked transfer-encoding" with streaming writes.
+///      You would set up the IOBuf with a negative write-count, and
+///      install a custom readfunc().  See example in test_aws4c.c (case
+///      12)
+
+static CURLcode
+s3_do_put_or_post ( IOBuf *read_b, char * const signature, 
+                    char * const date, char * const resource,
+                    int post_p,
+                    char* src_fname, IOBuf* write_b )
+{
+   AWSContext* ctx = (read_b->context ? read_b->context : &default_ctx);
+   AWS_CURL_ENTER(ctx);
+   CURL*       ch  = ctx->ch;
+
+  char  Buf[1024];
+  FILE* upload_fp = NULL;
+
+  int chunked = (read_b->flags & IOBF_CTE);
+
+  // accumulate all custom headers into <slist>
+  struct curl_slist *slist=NULL;
+  if (ctx->MimeType) {
+    snprintf ( Buf, sizeof(Buf), "Content-Type: %s", ctx->MimeType );
+    slist = curl_slist_append(slist, Buf );
+  }
+  if (ctx->AccessControl) {
+    snprintf ( Buf, sizeof(Buf), "x-amz-acl: %s", ctx->AccessControl );
+    slist = curl_slist_append(slist, Buf );
+  }
+  if (ctx->useRrs) {
+    strncpy ( Buf, "x-amz-storage-class: REDUCED_REDUNDANCY", sizeof(Buf) );
+    slist = curl_slist_append(slist, Buf );
+  }
+  if (ctx->byte_range.length) {
+     if (! ctx->emc_compatibility) {
+        fprintf(stderr, "ERROR: PUT/POST with 'byte-range' "
+                "not supported without EMC-extensions\n");
+        exit(1);
+     }
+     else if (ctx->byte_range.offset == (size_t)-1)
+        snprintf ( Buf, sizeof(Buf), "Range: bytes=-1-"); /* "append" */
+     else {
+        snprintf ( Buf, sizeof(Buf), "Range: bytes=%ld-%ld",
+                   ctx->byte_range.offset,
+                   ctx->byte_range.offset + ctx->byte_range.length -1);
+     }
+     slist = curl_slist_append(slist, Buf);
+     memset(&ctx->byte_range, 0, sizeof(ByteRange));       /* reset after each use */
+  }
+
+  snprintf ( Buf, sizeof(Buf), "Date: %s", date );
+  slist = curl_slist_append(slist, Buf );
+
+  snprintf ( Buf, sizeof(Buf), "Authorization: AWS %s:%s", ctx->awsKeyID, signature );
+  slist = curl_slist_append(slist, Buf );
+
+  // install user meta-data
+  MetaNode* meta;
+  for (meta=read_b->meta; meta; meta=meta->next) {
+     snprintf ( Buf, sizeof(Buf), "x-amz-meta-%s: %s", meta->key, meta->value );
+     slist = curl_slist_append(slist, Buf );
+  }
+
+  // sounds like CTE is supposed to be the default, if length is not
+  // provided, but we might as well be explicit.
+  if (chunked)
+     slist = curl_slist_append(slist, "Transfer-Encoding: chunked");
+
+  snprintf ( Buf, sizeof(Buf), "http://%s/%s", ctx->S3Host , resource );
+
+  curl_easy_setopt ( ch, CURLOPT_HTTPHEADER, slist);
+  curl_easy_setopt ( ch, CURLOPT_URL, Buf );
+  curl_easy_setopt ( ch, CURLOPT_VERBOSE, debug );
+  curl_easy_setopt ( ch, CURLOPT_UPLOAD, 1 );
+  curl_easy_setopt ( ch, CURLOPT_FOLLOWLOCATION, 1 );
+
+  curl_easy_setopt ( ch, CURLOPT_HEADERDATA, read_b ); /* keeping original code */
+  curl_easy_setopt ( ch, CURLOPT_HEADERFUNCTION, ( read_b->header_fn
+                                                   ? *(read_b->header_fn)
+                                                   : aws_headerfunc) );
+
+  if (ctx->S3Proxy)
+     curl_easy_setopt ( ch, CURLOPT_PROXY, ctx->S3Proxy);
+
+  // If caller provided an IOBuf to recv the response from the server,
+  // we'll arrange the writefunc to fill it.  Otherwise, if debugging is
+  // disabled, writedummyfunc will suppress the output.  Otherwise, if
+  // debugging is on, the response will go to stdout.
+  if (write_b) {
+    curl_easy_setopt ( ch, CURLOPT_WRITEDATA, write_b );
+    curl_easy_setopt ( ch, CURLOPT_WRITEFUNCTION, ( write_b->write_fn
+                                                    ? *(write_b->write_fn)
+                                                    : aws_writefunc) );
+  }
+  else if (!debug)
+    curl_easy_setopt ( ch, CURLOPT_WRITEFUNCTION, aws_writedummyfunc );
+
+
+  // maybe upload a file, instead of appending raw-data into the request via read_b
+  if (src_fname) {
+     struct stat stat_info;
+
+     stat(src_fname, &stat_info);
+     upload_fp = fopen(src_fname, "r");
+     if (! upload_fp) {
+        fprintf(stderr, "s3_do_put_or_post, couldn't open '%s' for reading: %s\n",
+                src_fname, strerror(errno));
+        exit(1);
+     }
+
+     curl_easy_setopt ( ch, CURLOPT_READDATA, upload_fp );
+     curl_easy_setopt ( ch, CURLOPT_READFUNCTION, (read_b->read_fn
+                                                   ? *(read_b->read_fn)
+                                                   : NULL) );
+     curl_easy_setopt ( ch, CURLOPT_INFILESIZE_LARGE, (curl_off_t)stat_info.st_size);
+  }
+  else {
+     curl_easy_setopt ( ch, CURLOPT_READDATA, read_b );
+     curl_easy_setopt ( ch, CURLOPT_READFUNCTION, (read_b->read_fn
+                                                   ? *(read_b->read_fn)
+                                                   : aws_readfunc) );
+
+     if (! chunked)
+        curl_easy_setopt ( ch, CURLOPT_INFILESIZE, read_b->write_count );
+  }
+
+
+  // if <post_p> is non-zero, use POST, instead of PUT
+  if (post_p) {
+    //    curl_easy_setopt ( ch, CURLOPT_POST, 1);    /* doesn't cause a POST? */
+    //    curl_easy_setopt ( ch, CURLOPT_POSTFIELDS, "uploads" ); /* DEBUGGING */
+    curl_easy_setopt(ch, CURLOPT_CUSTOMREQUEST, "POST");
+  }
+  else
+    curl_easy_setopt(ch, CURLOPT_PUT, 1);
+
+
+  CURLcode sc  = curl_easy_perform(ch);
+  __debug ( "Return Code: %d ", sc );
+  
+  curl_slist_free_all(slist);
+  if (upload_fp)
+     fclose(upload_fp);
+
+  AWS_CURL_EXIT(ctx);
+  return sc;
+}
+
+
+
+static CURLcode
+s3_do_get ( IOBuf* b, char* const signature, 
+            char* const date, char* const resource,
+            int head_p,
+            char* const dst_fname, IOBuf* response )
+{
+   AWSContext* ctx = (b->context ? b->context : &default_ctx);
+   AWS_CURL_ENTER(ctx);
+   CURL*       ch  = ctx->ch;
+
+  char  Buf[1024];
+  FILE* download_fp = NULL;
+
+  struct curl_slist *slist=NULL;
+
+  slist = curl_slist_append(slist, "If-Modified-Since: Tue, 26 May 2009 18:58:55 GMT" );
+  slist = curl_slist_append(slist, "ETag: \"6ea58533db38eca2c2cc204b7550aab6\"");
+
+  if (ctx->byte_range.length) {
+     snprintf ( Buf, sizeof(Buf), "Range: bytes=%ld-%ld",
+                ctx->byte_range.offset,
+                ctx->byte_range.offset + ctx->byte_range.length -1);
+     slist = curl_slist_append(slist, Buf);
+     memset(&ctx->byte_range, 0, sizeof(ByteRange));       /* reset after each use */
+  }
+
+  snprintf ( Buf, sizeof(Buf), "Date: %s", date );
+  slist = curl_slist_append(slist, Buf );
+
+  snprintf ( Buf, sizeof(Buf), "Authorization: AWS %s:%s", ctx->awsKeyID, signature );
+  slist = curl_slist_append(slist, Buf );
+
+  snprintf ( Buf, sizeof(Buf), "http://%s/%s", ctx->S3Host, resource );
+
+  curl_easy_setopt ( ch, CURLOPT_HTTPHEADER, slist);
+  curl_easy_setopt ( ch, CURLOPT_URL, Buf );
+  curl_easy_setopt ( ch, CURLOPT_VERBOSE, debug );
+
+  curl_easy_setopt ( ch, CURLOPT_HEADERDATA, b );
+  curl_easy_setopt ( ch, CURLOPT_HEADERFUNCTION, (b->header_fn ? b->header_fn : aws_headerfunc) );
+
+  if (ctx->S3Proxy)
+     curl_easy_setopt ( ch, CURLOPT_PROXY, ctx->S3Proxy);
+
+  // maybe turn this into a HEAD request
+  curl_easy_setopt ( ch, CURLOPT_NOBODY, head_p );
+  curl_easy_setopt ( ch, CURLOPT_HEADER, head_p );
+
+  // maybe download to a file, instead of appending raw-data to <b>
+  if (dst_fname) {
+    download_fp = fopen(dst_fname, "w");
+    if (! download_fp) {
+       fprintf(stderr, "s3_do_get, couldn't open '%s' for writing: %s\n",
+               dst_fname, strerror(errno));
+      exit(1);
+    }
+
+    curl_easy_setopt ( ch, CURLOPT_WRITEDATA,     download_fp );
+    curl_easy_setopt ( ch, CURLOPT_WRITEFUNCTION, (b->write_fn ? b->write_fn : NULL) );
+  }
+  else {
+     curl_easy_setopt ( ch, CURLOPT_WRITEDATA,     b );
+     curl_easy_setopt ( ch, CURLOPT_WRITEFUNCTION, (b->write_fn ? b->write_fn : aws_writefunc) );
+  }
+
+
+  CURLcode sc  = curl_easy_perform(ch);
+  /** \todo check the return code  */
+  __debug ( "Return Code: %d ", sc );
+  
+  curl_slist_free_all(slist);
+  if (download_fp)
+     fclose(download_fp);
+
+  AWS_CURL_EXIT(ctx);
+  return sc;
+}
+
+
+static CURLcode
+s3_do_delete ( IOBuf *b, char * const signature, 
+               char * const date, char * const resource )
+{
+   AWSContext* ctx = (b->context ? b->context : &default_ctx);
+   AWS_CURL_ENTER(ctx);
+   CURL*       ch  = ctx->ch;
+
+  char Buf[1024];
+
+  struct curl_slist *slist=NULL;
+
+
+  snprintf ( Buf, sizeof(Buf), "Date: %s", date );
+  slist = curl_slist_append(slist, Buf );
+
+  snprintf ( Buf, sizeof(Buf), "Authorization: AWS %s:%s", ctx->awsKeyID, signature );
+  slist = curl_slist_append(slist, Buf );
+
+  snprintf ( Buf, sizeof(Buf), "http://%s/%s", ctx->S3Host, resource );
+
+  curl_easy_setopt ( ch, CURLOPT_CUSTOMREQUEST, "DELETE");
+  curl_easy_setopt ( ch, CURLOPT_HTTPHEADER, slist);
+  curl_easy_setopt ( ch, CURLOPT_URL, Buf );
+  curl_easy_setopt ( ch, CURLOPT_VERBOSE, debug );
+
+  curl_easy_setopt ( ch, CURLOPT_HEADERDATA, b );
+  curl_easy_setopt ( ch, CURLOPT_HEADERFUNCTION, (b->header_fn ? b->header_fn : aws_headerfunc) );
+
+  if (ctx->S3Proxy)
+     curl_easy_setopt ( ch, CURLOPT_PROXY, ctx->S3Proxy);
+
+  CURLcode sc  = curl_easy_perform(ch);
+  /** \todo check the return code  */
+  __debug ( "Return Code: %d ", sc );
+
+  
+  curl_slist_free_all(slist);
+  AWS_CURL_EXIT(ctx);
+
+  return sc;
+}
+
+
+
+
+static char* __aws_sign ( char * const str, AWSContext* ctx )
+{
+  HMAC_CTX      hctx;
+  unsigned char MD[256];
+  unsigned      len;
+
+  __debug("StrToSign:\n%s", str );
+
+  HMAC_CTX_init(&hctx);
+  HMAC_Init(&hctx, ctx->awsKey, strlen(ctx->awsKey), EVP_sha1());
+  HMAC_Update(&hctx,(unsigned char*)str, strlen(str));
+  HMAC_Final(&hctx,(unsigned char*)MD, &len);
+  HMAC_CTX_cleanup(&hctx);
+
+  char * b64 = __b64_encode (MD, len);
+  __debug("Signature:  %s", b64 );
+
+  return b64;
+}
+/*!
+  \}
+*/
+
+
+
+#define SQS_REQ_TAIL   "&Signature=%s" "&SignatureVersion=1" "&Timestamp=%s" "&Version=2009-02-01"
+/*!
+  \defgroup sqs SQS Interface Functions
+  \{
+*/
+
+
+/// Create SQS queue
+/// \param b I/O buffer
+/// \param name queue name
+/// \return on success return 0, otherwise error code
+int sqs_create_queue ( IOBuf *b, char * const name )
+{
+  __debug ( "Creating Que: %s\n", name );
+   AWSContext* ctx = (b->context ? b->context : &default_ctx);
+
+  char  resource [1024];
+  char  customSign [1024];
+  char * date = NULL;
+  char * signature = NULL;
+  
+  char * Req = 
+    "http://%s/"
+    "?Action=CreateQueue"
+    "&QueueName=%s"
+    "&AWSAccessKeyId=%s"
+    SQS_REQ_TAIL ;
+
+  char * Sign = "ActionCreateQueue"
+                "AWSAccessKeyId%s"
+                "QueueName%s"
+                "SignatureVersion1"
+                "Timestamp%sVersion2009-02-01";
+
+  date = __aws_get_iso_date();
+  snprintf ( customSign, sizeof(customSign),
+             Sign, ctx->awsKeyID, name, date );
+
+  signature =  SQSSign ( customSign, ctx );
+
+  snprintf ( resource, sizeof(resource),
+             ctx->SQSHost, Req , name, ctx->awsKeyID, signature, date );
+
+  int sc = SQSRequest( b, "POST", resource ); 
+  free ( signature );
+  return sc;
+}
+
+
+/// Retrieve URL of the queue
+/// \param b I/O buffer
+/// \param prefix queue prefix. better use the whole name
+/// \return on success return 0, otherwise error code
+///
+/// URL is placed into the I/O buffer. User get_line to retrieve it
+int sqs_list_queues ( IOBuf *b, char * const prefix )
+{
+  __debug ( "Listing Queues PFX: %s\n", prefix );
+   AWSContext* ctx = (b->context ? b->context : &default_ctx);
+
+  char  resource [1024];
+  char  customSign [1024];
+  char * date = NULL;
+  char * signature = NULL;
+  
+  char * Req = 
+    "http://%s/"
+    "?Action=ListQueues"
+    "&QueueNamePrefix=%s"
+    "&AWSAccessKeyId=%s"
+     SQS_REQ_TAIL ;
+
+  char * Sign = "ActionListQueues"
+                "AWSAccessKeyId%s"
+                "QueueNamePrefix%s"
+                "SignatureVersion1"
+                "Timestamp%sVersion2009-02-01";
+
+  date = __aws_get_iso_date  ();
+  snprintf ( customSign, sizeof(customSign),
+             Sign, ctx->awsKeyID, prefix, date );
+
+  signature =  SQSSign ( customSign, ctx );
+
+  snprintf ( resource, sizeof(resource),
+             Req, ctx->SQSHost, prefix, ctx->awsKeyID, signature, date );
+
+  IOBuf *nb = aws_iobuf_new();
+  int sc = SQSRequest( nb, "POST", resource ); 
+  free ( signature );
+
+  if ( nb->result != NULL ) {
+     if (b->result)
+        free(b->result);
+     b->result = strdup(nb->result);
+  }
+  b->code   = nb->code;
+
+  /// \todo This only retrieves just one line in the string..
+  ///       make that all URLs are returned
+
+  if ( b->code == 200 ) {
+    /// Parse Out the List Of Queues
+    while(-1) {
+      char Ln[1024];
+      aws_iobuf_getline ( nb, Ln, sizeof(Ln));
+      if ( Ln[0] == 0 ) break;
+      char *q = strstr ( Ln, "<QueueUrl>" );
+      if ( q != 0 ) {
+        q += 10;
+        char * end = NULL;
+        end = strstr ( q, "</QueueUrl>" );
+        if ( *end != 0 ) {
+          * end = 0;
+          aws_iobuf_append ( b, q, strlen(q ));
+          aws_iobuf_append ( b, "\n", 1 );
+        }
+      }
+    }      
+  }
+  aws_iobuf_free ( nb );
+
+  return sc;
+}
+
+
+/// Retrieve queue attributes
+/// \param b I/O buffer
+/// \param url queue url. Use sqs_list_queues to retrieve
+/// \param timeOut queue visibility timeout
+/// \param nMesg   approximate number of messages in the queue
+/// \return on success return 0, otherwise error code
+int sqs_get_queueattributes ( IOBuf *b, char * url, int *timeOut, int *nMesg )
+{
+  __debug ( "Getting Que Attributes\n" );
+   AWSContext* ctx = (b->context ? b->context : &default_ctx);
+
+  char  resource [1024];
+  char  customSign [1024];
+  char * date = NULL;
+  char * signature = NULL;
+
+  char * Req = 
+    "%s/"
+    "?Action=GetQueueAttributes"
+    "&AttributeName.1=VisibilityTimeout"
+    "&AttributeName.2=ApproximateNumberOfMessages"
+    "&AWSAccessKeyId=%s"
+    SQS_REQ_TAIL ;
+
+  char * Sign = 
+    "ActionGetQueueAttributes"
+    "AttributeName.1VisibilityTimeout"
+    "AttributeName.2ApproximateNumberOfMessages"
+    "AWSAccessKeyId%s"
+    "SignatureVersion1"
+    "Timestamp%s"
+    "Version2009-02-01";
+
+  date = __aws_get_iso_date  ();
+  snprintf ( customSign, sizeof(customSign),
+             Sign, ctx->awsKeyID, date );
+
+  signature =  SQSSign ( customSign, ctx );
+
+  snprintf ( resource, sizeof(resource),
+             Req, url, ctx->awsKeyID, signature, date );
+
+  const char *pfxVisTO = "<Name>VisibilityTimeout</Name><Value>";
+  const char *pfxQLen  = "<Name>ApproximateNumberOfMessages</Name><Value>";
+
+
+  int sc = SQSRequest( b, "POST", resource ); 
+  while(-1) 
+    {
+      char Ln[1024];
+      aws_iobuf_getline ( b, Ln, sizeof(Ln));
+      if ( Ln[0] == 0 ) break;
+      
+      char *q;
+      q = strstr ( Ln, pfxVisTO );
+      if ( q != 0 ) { *timeOut = atoi(q+strlen(pfxVisTO));  }
+      q = strstr ( Ln, pfxQLen );
+      if ( q != 0 ) { *nMesg = atoi(q+strlen(pfxQLen));  }
+    }
+
+  free ( signature );
+  return sc;
+}
+
+/// Set queue visibility timeout
+/// \param b I/O buffer
+/// \param url queue url. Use sqs_list_queues to retrieve
+/// \param sec queue visibility timeout
+/// \return on success return 0, otherwise error code
+int sqs_set_queuevisibilitytimeout ( IOBuf *b, char * url, int sec )
+{
+  __debug ( "Setting Visibility Timeout : %d\n", sec );
+   AWSContext* ctx = (b->context ? b->context : &default_ctx);
+
+  char  resource [1024];
+  char  customSign [1024];
+  char * date = NULL;
+  char * signature = NULL;
+
+  char * Req = 
+    "%s/"
+    "?Action=SetQueueAttributes"
+    "&Attribute.1.Name=VisibilityTimeout"
+    "&Attribute.1.Value=%d"
+    "&AWSAccessKeyId=%s"
+    SQS_REQ_TAIL ;
+
+  char * Sign = 
+    "ActionSetQueueAttributes"
+    "Attribute.1.NameVisibilityTimeout"
+    "Attribute.1.Value%d"
+    "AWSAccessKeyId%s"
+    "SignatureVersion1"
+    "Timestamp%s"
+    "Version2009-02-01";
+
+  date = __aws_get_iso_date  ();
+  snprintf ( customSign, sizeof(customSign),
+             Sign, sec, ctx->awsKeyID, date );
+
+  signature =  SQSSign ( customSign, ctx );
+
+  snprintf ( resource, sizeof(resource), Req , 
+             url, sec, ctx->awsKeyID, signature, date );
+
+  int sc = SQSRequest( b, "POST", resource ); 
+  free ( signature );
+  return sc;
+}
+
+/// Send a message to the queue
+/// \param b I/O buffer
+/// \param url queue url. Use sqs_list_queues to retrieve
+/// \param msg a message to send
+/// \return on success return 0, otherwise error code
+int sqs_send_message ( IOBuf *b, char * const url, char * const msg )
+{
+  __debug ( "Sending Message to the queue %s\n[%s]", url, msg );
+   AWSContext* ctx = (b->context ? b->context : &default_ctx);
+
+  char  resource [10900];
+  char  customSign [10900];
+  char * date = NULL;
+  char * signature = NULL;
+  char  encodedMsg[8192];
+
+  __aws_urlencode ( msg, encodedMsg, sizeof(encodedMsg));
+  __debug ( "Encoded MSG %s", encodedMsg );
+
+  char * Req = 
+    "%s/"
+    "?Action=SendMessage"
+    "&MessageBody=%s"
+    "&AWSAccessKeyId=%s"
+    SQS_REQ_TAIL ;
+
+  char * Sign = 
+    "ActionSendMessage"
+    "AWSAccessKeyId%s"
+    "MessageBody%s"
+    "SignatureVersion1"
+    "Timestamp%s"
+    "Version2009-02-01";
+
+  date = __aws_get_iso_date  ();
+  snprintf ( customSign, sizeof(customSign),
+             Sign, ctx->awsKeyID, msg, date );
+
+  signature =  SQSSign ( customSign, ctx );
+
+  snprintf ( resource, sizeof(resource), Req , 
+             url, encodedMsg, ctx->awsKeyID, signature, date );
+
+  int sc = SQSRequest( b, "POST", resource ); 
+  free ( signature );
+  return sc;
+}
+
+/// Retrieve a message from the queue
+/// \param b I/O buffer
+/// \param url queue url. Use sqs_list_queues to retrieve
+/// \param id Message receipt handle. 
+/// \return on success return 0, otherwise error code
+///
+/// Message contents are placed into I/O buffer
+/// Caller has to allocate enough memory for the receipt handle 
+/// 1024 bytes should be enough
+int sqs_get_message ( IOBuf * b, char * const url, char * id  )
+{
+  __debug ( "Retieving message from: %s", url );
+   AWSContext* ctx = (b->context ? b->context : &default_ctx);
+
+  char  resource [10900];
+  char  customSign [10900];
+  char * date = NULL;
+  char * signature = NULL;
+
+  char * Req = 
+    "%s/"
+    "?Action=ReceiveMessage"
+    "&AWSAccessKeyId=%s"
+    SQS_REQ_TAIL ;
+
+  char * Sign = 
+    "ActionReceiveMessage"
+    "AWSAccessKeyId%s"
+    "SignatureVersion1"
+    "Timestamp%s"
+    "Version2009-02-01";
+
+  date = __aws_get_iso_date  ();
+  snprintf ( customSign, sizeof(customSign), Sign,
+             ctx->awsKeyID, date );
+
+  signature =  SQSSign ( customSign, ctx );
+
+  snprintf ( resource, sizeof(resource), Req,
+             url, ctx->awsKeyID, signature, date );
+  free ( signature );
+
+  IOBuf * bf = aws_iobuf_new();
+  int sc = SQSRequest( bf, "POST", resource ); 
+
+  b->code = bf->code;
+  if (b->result)
+      free(b->result);
+  b->result = strdup(bf->result);
+  
+  if ( bf->code != 200 ) {
+    aws_iobuf_free(bf);
+    return sc;
+  }
+
+  /// \todo This is really bad. Must get a real message parser
+  int inBody = 0;
+  while(-1) {
+    char Ln[1024];
+    aws_iobuf_getline ( bf, Ln, sizeof(Ln));
+    if ( Ln[0] == 0 ) break;
+
+    __debug ( "%s|%s|", inBody ? ">>": "", Ln );
+
+    char *q;
+    char *e;
+
+    /// Handle a body already being processed..
+    if ( inBody ) {
+      e = strstr ( Ln, "</Body>" );
+      if ( e ) { *e = 0; inBody = 0; }
+      aws_iobuf_append (b, Ln, strlen(Ln));
+      if ( ! inBody ) break;
+      continue;     
+    }
+
+    q = strstr ( Ln, "<ReceiptHandle>" );
+    if ( q != 0 ) {
+      q += 15;
+      e = strstr ( Ln, "</ReceiptHandle>" );
+      *e = 0;
+      strcpy ( id, q );
+      q = e+1;
+      q = strstr ( q, "<Body>" );
+      if ( q != 0 ) {
+        q += 6;
+        e = strstr ( q, "</Body>" );
+        if ( e ) *e = 0; else inBody = 1;
+        aws_iobuf_append (b, q, strlen(q));
+      }
+    }
+  }
+
+  return sc;
+}
+
+/// Delete processed message from the queue
+/// \param bf I/O buffer
+/// \param url queue url. Use sqs_list_queues to retrieve
+/// \param receipt Message receipt handle. 
+/// \return on success return 0, otherwise error code
+///
+int sqs_delete_message ( IOBuf * b, char * const url, char * receipt )
+{
+   AWSContext* ctx = (b->context ? b->context : &default_ctx);
+
+  char  resource [10900];
+  char  customSign [10900];
+  char * date = NULL;
+  char * signature = NULL;
+
+  char * Req = 
+    "%s/"
+    "?Action=DeleteMessage"
+    "&ReceiptHandle=%s"
+    "&AWSAccessKeyId=%s"
+      SQS_REQ_TAIL ;
+
+  char * Sign = 
+    "ActionDeleteMessage"
+    "AWSAccessKeyId%s"
+    "ReceiptHandle%s"
+    "SignatureVersion1"
+    "Timestamp%s"
+    "Version2009-02-01";
+
+  date = __aws_get_iso_date  ();
+  snprintf ( customSign, sizeof(customSign), Sign,
+             ctx->awsKeyID, receipt, date );
+
+  signature =  SQSSign ( customSign, ctx );
+
+  char encReceipt[1024];
+  __aws_urlencode ( receipt, encReceipt, sizeof(encReceipt));
+
+  snprintf ( resource, sizeof(resource), Req,
+             url, encReceipt, ctx->awsKeyID, signature, date );
+  free ( signature );
+
+  int sc = SQSRequest( b, "POST", resource ); 
+  return sc;
+}
+
 
 
 /*!
