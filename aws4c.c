@@ -63,8 +63,10 @@
 // with dynamically-allocated strings.  This lets us know whether to free,
 // or not.
 typedef enum {
-   S3HOST_STATIC  = 0x01,
-   S3PROXY_STATIC = 0x02
+   S3HOST_STATIC    = 0x01,
+   S3PROXY_STATIC   = 0x02,
+   AWS4C_EMC_COMPAT = 0x04,
+   AWS4C_CTE        = 0x08,
 } AWS4C_FLAGS;
 
 
@@ -550,7 +552,6 @@ void aws_context_reset_r(AWSContext* ctx) {
       .AccessControl = NULL,
 
       .byte_range = {0, 0},        /* resets automatically, after next GET */
-      .emc_compatibility = 0,      /// <support EMC extended functionality
       .flags = (S3HOST_STATIC | S3PROXY_STATIC), /*  */
    };
 }
@@ -874,8 +875,30 @@ void s3_enable_EMC_extensions ( int value ) {
    s3_enable_EMC_extensions_r(value, &default_ctx);
 }
 void s3_enable_EMC_extensions_r ( int value, AWSContext* ctx ) {
-   ctx->emc_compatibility = value;
+   if (value)
+      ctx->flags |= AWS4C_EMC_COMPAT;
+   else
+      ctx->flags &= ~(AWS4C_EMC_COMPAT);
 }
+
+
+
+/// This was a flag in IOBuf, but that is subject to getting wiped by
+/// aws_iobuf_reset().  We could either (a) assure that IOBuf.flags also
+/// gets preserved by aws_iobuf_reset(), or move these into the context.
+/// Because this is currently the only flag, it should probably get merged
+/// into AWSContext.flags, letting us get rid of IOBuf.flags altogether.
+/// Set chunked-transfer-encoding ON / OFF
+void s3_chunked_transfer_encoding ( int value ) {
+   s3_chunked_transfer_encoding_r(value, &default_ctx);
+}
+void s3_chunked_transfer_encoding_r ( int value, AWSContext* ctx ) {
+   if (value)
+      ctx->flags |= AWS4C_CTE;
+   else
+      ctx->flags &= ~(AWS4C_CTE);
+}
+
 
 
 
@@ -1272,14 +1295,6 @@ void   aws_iobuf_readfunc  (IOBuf* b, ReadFnPtr  read_fn) {
 // This is called when more data is received, during a GET.
 void   aws_iobuf_writefunc (IOBuf* b, WriteFnPtr write_fn) {
    b->write_fn = write_fn;
-}
-
-// Set chunked-transfer-encoding ON / OFF
-void aws_iobuf_chunked_transfer_encoding(IOBuf* b, int enable) {
-   if (enable)
-      b->flags |= IOBF_CTE;
-   else
-      b->flags &= ~(IOBF_CTE);
 }
 
 // Not sure whether we should free the old context here.  What if it's
@@ -1743,7 +1758,7 @@ s3_do_put_or_post ( IOBuf *read_b, char * const signature,
   char  Buf[1024];
   FILE* upload_fp = NULL;
 
-  int chunked = (read_b->flags & IOBF_CTE);
+  int chunked = (ctx->flags & AWS4C_CTE);
 
   // accumulate all custom headers into <slist>
   struct curl_slist *slist=NULL;
@@ -1760,7 +1775,7 @@ s3_do_put_or_post ( IOBuf *read_b, char * const signature,
     slist = curl_slist_append(slist, Buf );
   }
   if (ctx->byte_range.length) {
-     if (! ctx->emc_compatibility) {
+     if (! (ctx->flags & AWS4C_EMC_COMPAT)) {
         fprintf(stderr, "ERROR: PUT/POST with 'byte-range' "
                 "not supported without EMC-extensions\n");
         exit(1);

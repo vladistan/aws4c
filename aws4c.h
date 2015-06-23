@@ -111,7 +111,9 @@ void s3_set_proxy     ( const char* const str );
 void s3_set_mime      ( const char* const str );
 void s3_set_acl       ( const char* const str );
 void s3_set_byte_range( size_t offset, size_t length );
-void s3_enable_EMC_extensions( int value );
+
+void s3_enable_EMC_extensions     ( int value );
+void s3_chunked_transfer_encoding ( int value );
 
 
 // ---------------------------------------------------------------------------
@@ -150,7 +152,6 @@ typedef struct AWSContext {
    char* AccessControl;
 
    ByteRange byte_range;        /// <reset automatically after next GET
-   int  emc_compatibility;      /// <support EMC extended functionality
    int  flags;
 } AWSContext;
 
@@ -182,7 +183,9 @@ void s3_set_proxy_r     ( const char* const str, AWSContext* ctx );
 void s3_set_mime_r      ( const char* const str, AWSContext* ctx );
 void s3_set_acl_r       ( const char* const str, AWSContext* ctx );
 void s3_set_byte_range_r( size_t offset, size_t length, AWSContext* ctx );
-void s3_enable_EMC_extensions_r( int value, AWSContext* ctx );
+
+void s3_enable_EMC_extensions_r     ( int value, AWSContext* ctx );
+void s3_chunked_transfer_encoding_r ( int value, AWSContext* ctx );
 
 
 
@@ -209,9 +212,6 @@ typedef struct _MetaNode {
    struct   _MetaNode* next;
 } MetaNode;
 
-typedef enum {
-   IOBF_CTE  = 0x01,            // transfer-encoding = chunked
-} IOBufFFlags;
 
 
 // signatures for standard libcurl headerfunc / readfunc / writefunc
@@ -257,7 +257,6 @@ typedef struct IOBuf
 
    int         code;
    char*       result;          // string for <code>, (e.g. 'Not Found')
-   unsigned char flags;
 
    AWSContext* context;        // [*] optional, for thread-safety
    void*       user_data;      // [*] e.g. to pass extra info to a readfunc
