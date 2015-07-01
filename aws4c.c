@@ -472,7 +472,7 @@ static char * GetStringToSign ( char *       resource,
     snprintf ( resource, resSize, "%s", file );
 
   // Scality sproxyd doesn't require an Authorization header in the request.
-  if (ctx->flags && AWS4C_SPROXYD)
+  if (ctx->flags & AWS4C_SPROXYD)
      return NULL;
 
   return __aws_sign(reqToSign, ctx);
