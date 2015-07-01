@@ -63,10 +63,12 @@
 // with dynamically-allocated strings.  This lets us know whether to free,
 // or not.
 typedef enum {
-   S3HOST_STATIC    = 0x01,
-   S3PROXY_STATIC   = 0x02,
-   AWS4C_EMC_COMPAT = 0x04,
-   AWS4C_CTE        = 0x08,
+   S3HOST_STATIC        = 0x01,
+   S3PROXY_STATIC       = 0x02,
+   AWS4C_CTE            = 0x04,
+   AWS4C_EMC_COMPAT     = 0x10,
+   AWS4C_SCALITY_COMPAT = 0x20,
+   AWS4C_SPROXYD        = 0x40,
 } AWS4C_FLAGS;
 
 
@@ -468,6 +470,10 @@ static char * GetStringToSign ( char *       resource,
   // EU: If bucket is in virtual host name, remove bucket from path
   if (ctx->Bucket && strncmp(ctx->S3Host, ctx->Bucket, strlen(ctx->Bucket)) == 0)
     snprintf ( resource, resSize, "%s", file );
+
+  // Scality sproxyd doesn't require an Authorization header in the request.
+  if (ctx->flags && AWS4C_SPROXYD)
+     return NULL;
 
   return __aws_sign(reqToSign, ctx);
 }
@@ -875,10 +881,31 @@ void s3_enable_EMC_extensions ( int value ) {
    s3_enable_EMC_extensions_r(value, &default_ctx);
 }
 void s3_enable_EMC_extensions_r ( int value, AWSContext* ctx ) {
-   if (value)
+   if (value && (ctx->flags & AWS4C_SCALITY_COMPAT)) {
+      fprintf(stderr, "s3_enable_EMC() -- already enabled Scality extensions\n");
+      exit(1);
+   }
+   else if (value)
       ctx->flags |= AWS4C_EMC_COMPAT;
    else
       ctx->flags &= ~(AWS4C_EMC_COMPAT);
+}
+
+
+// Not sure if these are strictly "extensions".  Scality sproxyd is more
+// like bare-bones curl GET / PUT / DELETE, without AWS authentication.
+void s3_enable_Scality_extensions ( int value ) {
+   s3_enable_Scality_extensions_r(value, &default_ctx);
+}
+void s3_enable_Scality_extensions_r ( int value, AWSContext* ctx ) {
+   if (value && (ctx->flags & AWS4C_EMC_COMPAT)) {
+      fprintf(stderr, "s3_enable_Scality() -- already enabled EMC extensions\n");
+      exit(1);
+   }
+   else if (value)
+      ctx->flags |= AWS4C_SCALITY_COMPAT;
+   else
+      ctx->flags &= ~(AWS4C_SCALITY_COMPAT);
 }
 
 
@@ -893,6 +920,19 @@ void s3_chunked_transfer_encoding ( int value ) {
    s3_chunked_transfer_encoding_r(value, &default_ctx);
 }
 void s3_chunked_transfer_encoding_r ( int value, AWSContext* ctx ) {
+   if (value)
+      ctx->flags |= AWS4C_CTE;
+   else
+      ctx->flags &= ~(AWS4C_CTE);
+}
+
+
+// Use Scality's sproxyd, which just amounts to removing the encrypted auth
+// header, from S3.
+void s3_sproxyd ( int value ) {
+   s3_chunked_transfer_encoding_r(value, &default_ctx);
+}
+void s3_sproxyd_r ( int value, AWSContext* ctx ) {
    if (value)
       ctx->flags |= AWS4C_CTE;
    else
@@ -1794,8 +1834,15 @@ s3_do_put_or_post ( IOBuf *read_b, char * const signature,
   snprintf ( Buf, sizeof(Buf), "Date: %s", date );
   slist = curl_slist_append(slist, Buf );
 
-  snprintf ( Buf, sizeof(Buf), "Authorization: AWS %s:%s", ctx->awsKeyID, signature );
-  slist = curl_slist_append(slist, Buf );
+  if (!signature && !(ctx->flags && AWS4C_SPROXYD)) {
+     fprintf(stderr, "ERROR: PUT/POST without AWS signature "
+             "only supported for Sproxyd\n");
+     exit(1);
+  }
+  else if (signature) {
+     snprintf ( Buf, sizeof(Buf), "Authorization: AWS %s:%s", ctx->awsKeyID, signature );
+     slist = curl_slist_append(slist, Buf );
+  }
 
   // install user meta-data
   MetaNode* meta;
@@ -1920,8 +1967,15 @@ s3_do_get ( IOBuf* b, char* const signature,
   snprintf ( Buf, sizeof(Buf), "Date: %s", date );
   slist = curl_slist_append(slist, Buf );
 
-  snprintf ( Buf, sizeof(Buf), "Authorization: AWS %s:%s", ctx->awsKeyID, signature );
-  slist = curl_slist_append(slist, Buf );
+  if (!signature && !(ctx->flags && AWS4C_SPROXYD)) {
+     fprintf(stderr, "ERROR: GET without AWS signature "
+             "only supported for Sproxyd\n");
+     exit(1);
+  }
+  else if (signature) {
+     snprintf ( Buf, sizeof(Buf), "Authorization: AWS %s:%s", ctx->awsKeyID, signature );
+     slist = curl_slist_append(slist, Buf );
+  }
 
   snprintf ( Buf, sizeof(Buf), "http://%s/%s", ctx->S3Host, resource );
 
@@ -1986,8 +2040,15 @@ s3_do_delete ( IOBuf *b, char * const signature,
   snprintf ( Buf, sizeof(Buf), "Date: %s", date );
   slist = curl_slist_append(slist, Buf );
 
-  snprintf ( Buf, sizeof(Buf), "Authorization: AWS %s:%s", ctx->awsKeyID, signature );
-  slist = curl_slist_append(slist, Buf );
+  if (!signature && !(ctx->flags && AWS4C_SPROXYD)) {
+     fprintf(stderr, "ERROR: DELETE without AWS signature "
+             "only supported for Sproxyd\n");
+     exit(1);
+  }
+  else if (signature) {
+     snprintf ( Buf, sizeof(Buf), "Authorization: AWS %s:%s", ctx->awsKeyID, signature );
+     slist = curl_slist_append(slist, Buf );
+  }
 
   snprintf ( Buf, sizeof(Buf), "http://%s/%s", ctx->S3Host, resource );
 

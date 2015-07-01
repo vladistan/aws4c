@@ -815,7 +815,7 @@ void test_streaming_write2(IOBuf* b) {
    printf("%s\n", b->result);
 
    aws_iobuf_reset(b);
-   aws_iobuf_chunked_transfer_encoding(b, 1);
+   s3_chunked_transfer_encoding(1);
    ///   aws_iobuf_readfunc(b, &streaming_readfunc2_cte);
    aws_iobuf_readfunc(b, &streaming_readfunc2b_cte);
 
@@ -830,7 +830,7 @@ void test_streaming_write2(IOBuf* b) {
    AWS4C_CHECK   ( s3_put(b, (char*)obj) ); /* create empty object with user metadata */
    AWS4C_CHECK_OK( b );
 
-   aws_iobuf_chunked_transfer_encoding(b, 0);
+   s3_chunked_transfer_encoding(0);
 }
 
 
@@ -855,6 +855,46 @@ void test_streaming_write2(IOBuf* b) {
 
 
 
+// At LANL, test this against 10.135.0.21:81
+//
+// NOTE: for the case of by-path access, the "bucket" (i.e. first element
+//     of the object-ID) is really the fastcgi identifier, which in our
+//     case must be "proxy".  And the second element of the second element
+//     of the object-ID selects the access method, which for now must be
+//     "bparc".
+//
+//     So, the object-ID looks like "/proxy/bparc/whatever_else_you_want"
+
+void test_sproxyd_by_path(IOBuf* b) {
+   const char* bkt = "proxy";   // not really an S3 bucket
+   const char* obj = "bparc/sproxyd_test";
+
+   aws_set_debug(1);
+
+   s3_enable_Scality_extensions(1);
+   s3_sproxyd(1);
+
+   s3_set_bucket(bkt);
+   s3_chunked_transfer_encoding(1);
+
+   const char* contents = "Here's a bunch of text\n";
+   aws_iobuf_reset(b);
+   aws_iobuf_append_static(b, (char*)contents, strlen(contents));
+
+   printf("writing /%s/%s\n", bkt, obj);
+   s3_put(b, (char*)obj);
+
+   printf("reading /%s/%s\n", bkt, obj);
+   aws_iobuf_reset(b);
+   s3_get(b, (char*)obj);
+
+   // show contents of IOBuf
+   debug_iobuf(b, 1, 1);
+
+   char read_buf[256];          // big enough to hold <contents>
+   size_t read_ct = aws_iobuf_getline(b, read_buf, strlen(contents) +1);
+   printf("results (%ld): %s", read_ct, read_buf);
+}
 
 
 
@@ -882,19 +922,23 @@ main(int argc, char* argv[]) {
    char*             proxy_ip    = ((argc > 3) ? argv[3] : NULL);
 
    IOBuf* b = aws_iobuf_new();
-   s3_connect(host_ip, proxy_ip);
 
-   // make sure TEST_BUCKET exists
-	s3_set_bucket(TEST_BUCKET);
-   AWS4C_CHECK( s3_head(b, "") );
-   if (b->code == 404 ) {              /* 404 Not Found */
-      AWS4C_CHECK   ( s3_put(b, "") ); /* creates URL as bucket + obj */
-      AWS4C_CHECK_OK( b );
-      printf("created bucket '%s'\n", TEST_BUCKET);
-   }
-   else if (b->code != 200 ) {         /* 200 OK */
-      fprintf(stderr, "Unexpected HTTP return-code %d '%s'\n", b->code, b->result);
-      exit(1);
+   s3_connect(host_ip, proxy_ip);
+   s3_set_bucket(TEST_BUCKET);
+
+   if (test_number < 100) {
+
+      // make sure TEST_BUCKET exists
+      AWS4C_CHECK( s3_head(b, "") );
+      if (b->code == 404 ) {              /* 404 Not Found */
+         AWS4C_CHECK   ( s3_put(b, "") ); /* creates URL as bucket + obj */
+         AWS4C_CHECK_OK( b );
+         printf("created bucket '%s'\n", TEST_BUCKET);
+      }
+      else if (b->code != 200 ) {         /* 200 OK */
+         fprintf(stderr, "Unexpected HTTP return-code %d '%s'\n", b->code, b->result);
+         exit(1);
+      }
    }
 
 
@@ -1063,6 +1107,26 @@ main(int argc, char* argv[]) {
       aws_iobuf_reset(b);
       test_streaming_write2(b);
       return 0;
+
+
+
+      // ----------------------------------------------------------------------
+      // if (test_number >= 100) we will not try to assure a bucket has been
+      // created.  That's because these tests might not use buckets.  For
+      // example, Scality's sproxyd has no notion of "buckets".  It's just
+      // pure GET/PUT/DELETE.  However, object-names will still be bucket+object
+      // ----------------------------------------------------------------------
+
+   case 100:
+      // --- Use Scality sproxyd.  Currently this amounts to nothing more
+      //     than suppressing the generation and installation of the
+      //     "Authorization" header, in all GET/PUT/POST/DELETE requests.
+      //
+      //     status: WORKS
+
+      test_sproxyd_by_path(b);
+      return 0;
+
 
 
    default:

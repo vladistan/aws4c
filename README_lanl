@@ -93,22 +93,51 @@ library support to be used:
     s3_put(io_buf, obj_name);
 
 
-(6) user metadata on objects
+(6) Scality sproxyd extensions
 
-You can add custom metadata to objects.
+Scality sproxyd is now supported, as well.  This is basically just a "pure
+curl" interface, without the S3 authentication.  Should we just rename this
+to something like pure curl, instead of sproxyd?  Test 100 in test_aws.c
+shows how to use it.
+
+Basically, the S3 "bucket" just becomes the first part of the path, which
+for sproxyd is the "proxy" that fastcgi on the server uses to dispatch to
+sproxyd.  The second part of the path (i.e. first part of the S3
+"object_name") becomes the sproxyd "namespace".  This coresponds with the
+driver name in the /etc/sproxyd.conf setup on the server.
+
+How do you know which tings are EMC and which are Scality?  Well, the code
+currently throws an error (with a meaningful message) if you try to do
+something special that requires one set of extensions or the other, and you
+haven't enabled them yet.  The two extensions are considered
+mutually-exclusive, so it is also an error to try to set them both.
 
 
-(7) streaming reads/writes, and chunked transfer-encoding
+(7) user metadata on objects
+
+You can add custom metadata to objects.  You build metadata as a distinct
+structure, which you can then install into an iobuf.  This allows you to
+reuse metadata, if you want to.  When parsing replies, we can also parse
+out user-metadata.
+
+
+(8) streaming reads/writes, and chunked transfer-encoding
 
 These are independent things that you can do, or you can combine them.  The
 motivation for a streaming PUT (for example), is that you have a
-data-producer that is providing data buffers, and you want to write them
-into the PUT stream as they become available, rather than buffering an
-entire object before writing, or reading it from a file.  So, you supply a
-custom curl readfunc, which blocks (e.g. on a posix semaphore) until data
-is available, then adds it to the stream (e.g. by moving it into curl's
-buffer given to the readfunc, and returning).  [See case 11 and 12 in
-test_aws.c.]
+data-producer that is providing data buffers, and you want to add these
+buffers into the ongoing PUT stream as they become available, rather than
+buffering an entire object before writing.
+
+So, you supply a custom curl readfunc, which blocks (e.g. on a POSIX
+semaphore) until data is available, then adds it to the stream (e.g. by
+moving it into curl's buffer given to the readfunc, and returning).
+
+See case 11 and 12 in test_aws.c, for a crude example.  There is also a
+file called object_stream.c in the MarFS file-system
+(https://github.com/mar-file-system/marfs.git) which uses this capability
+in a more-refined way.  The latter is in fact the reason for this extension
+to aws4c.
 
 It may be that you don't know ahead of time how much data your
 data-producer will produce.  In this case, you can't supply a length
@@ -126,7 +155,7 @@ IOBuf now also supports an "avail" member, which tells how much unread data
 is there.
 
 
-(8) thread-safety
+(9) thread-safety
 
 All global variables have been moved into a new AWSContext struct.  There
 is a global instance of this struct, which is used by default everywhere.
@@ -157,22 +186,23 @@ like this:
 
 
 
-(8) extras
+(10) extras
 
-The 0.5.2 makefile builds a library, libaws4c.  We also provide some
-debugging functions and XML support, which probably should not be part of
-the default library.  Therefore, these have their own header
-(aws4c_extras.h) and are built into a separate library libaws4c_extras.
-This allows test-apps to use extra functionality, without requiring the
-production library to be as big.
+The makefile builds a library, libaws4c.  We also provide some
+debugging-functions (e.g. pretty-print some diagnostics about an IOBuf) and
+XML support, which probably should not be part of the default library.
+Therefore, these have their own header (aws4c_extras.h) and are built into
+a separate library libaws4c_extras.  This allows test-apps to use extra
+functionality, without requiring the production library to be as big.
 
 
-(9) unit-tests
+
+(11) unit-tests
 
 Feel free to add new unit-tests to test_aws.c This allows simple tests of
 new functions, and provides a crude regression-test.
 
-NOTE: There are some tests that currently depend on posix threads.  Because
+NOTE: There are some tests that currently depend on POSIX threads.  Because
 this may not build on some systems, this is an option that is disabled by
 default.  If you explicitly call make test_aws_threaded, you'll get the
 pthreads tests, as well.
