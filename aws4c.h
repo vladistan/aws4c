@@ -115,6 +115,9 @@ void s3_set_byte_range( size_t offset, size_t length );
 void s3_enable_EMC_extensions     ( int value );
 void s3_enable_Scality_extensions ( int value );
 
+// @@@-HTTPS
+void s3_enable_https		  ( int value );
+
 void s3_chunked_transfer_encoding ( int value );
 void s3_sproxyd                   ( int value );
 
@@ -189,6 +192,9 @@ void s3_set_byte_range_r( size_t offset, size_t length, AWSContext* ctx );
 
 void s3_enable_EMC_extensions_r     ( int value, AWSContext* ctx );
 void s3_enable_Scality_extensions_r ( int value, AWSContext* ctx );
+
+// @@@-HTTPS
+void s3_enable_https_r		    ( int value, AWSContext* ctx );
 
 void s3_chunked_transfer_encoding_r ( int value, AWSContext* ctx );
 void s3_sproxyd_r                   ( int value, AWSContext* ctx );
