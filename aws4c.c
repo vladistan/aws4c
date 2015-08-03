@@ -1563,6 +1563,7 @@ static int SQSRequest ( IOBuf *b, char * verb, char * const url )
 
 // @@@-HTTPS
   if ( ctx->flags & AWS4C_HTTPS_INSECURE ) {
+     curl_easy_setopt( ch, CURLOPT_SSL_VERIFYPEER, 0L );
      curl_easy_setopt( ch, CURLOPT_SSL_VERIFYHOST, 0L );
   }
   curl_easy_setopt ( ch, CURLOPT_URL, url );
@@ -1884,6 +1885,7 @@ s3_do_put_or_post ( IOBuf *read_b, char * const signature,
   curl_easy_setopt ( ch, CURLOPT_HTTPHEADER, slist);
 // @@@-HTTPS
   if ( ctx->flags & AWS4C_HTTPS_INSECURE ) {
+     curl_easy_setopt( ch, CURLOPT_SSL_VERIFYPEER, 0L );
      curl_easy_setopt( ch, CURLOPT_SSL_VERIFYHOST, 0L );
   }
   curl_easy_setopt ( ch, CURLOPT_URL, Buf );
@@ -2009,6 +2011,7 @@ s3_do_get ( IOBuf* b, char* const signature,
   curl_easy_setopt ( ch, CURLOPT_HTTPHEADER, slist);
 // @@@-HTTPS
   if ( ctx->flags & AWS4C_HTTPS_INSECURE ) {
+     curl_easy_setopt( ch, CURLOPT_SSL_VERIFYPEER, 0L );
      curl_easy_setopt( ch, CURLOPT_SSL_VERIFYHOST, 0L );
   }
   curl_easy_setopt ( ch, CURLOPT_URL, Buf );
@@ -2087,6 +2090,7 @@ s3_do_delete ( IOBuf *b, char * const signature,
   curl_easy_setopt ( ch, CURLOPT_HTTPHEADER, slist);
 // @@@-HTTPS
   if ( ctx->flags & AWS4C_HTTPS_INSECURE ) {
+     curl_easy_setopt( ch, CURLOPT_SSL_VERIFYPEER, 0L );
      curl_easy_setopt( ch, CURLOPT_SSL_VERIFYHOST, 0L );
   }
   curl_easy_setopt ( ch, CURLOPT_URL, Buf );
