@@ -243,7 +243,10 @@ typedef size_t (*HeaderFnPtr)(char* ptr, size_t size, size_t nitems, void* strea
 #endif
 
 /// IOBuf structure
-/// NOTE: Things marked "[***]" are not cleared by aws_iobuf_reset()
+/// Any changes here require co-maintenance of aws_iobuf_reset()
+///
+/// NOTE: Things marked "[*]" are not cleared by aws_iobuf_reset()
+///
 typedef struct IOBuf 
 {
    IOBufNode*  first;

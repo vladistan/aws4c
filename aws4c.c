@@ -1013,10 +1013,29 @@ void iobuf_node_list_free(IOBufNode* n) {
    }
 }
 
-/// Free IOBufNodes, and reset related fields to pristine state.  This allows reuse of the
-/// same IOBuf, across multiple calls.  Some other fields are left intact.  The idea is
-// that these are fields one would want preserved, when just resetting the
-// read/write-related state.
+// Free IOBufNodes, and reset related fields to pristine state.  This
+// allows reuse of the same IOBuf, across multiple calls.  Some other
+// fields are left intact.  The idea is that these are fields one would
+// want preserved, when just resetting the read/write-related state.
+//
+// NOTE: MarFS uses IOBuf as the argument in callbacks to a user-defined
+//     readfunc and writefunc.  These in turn follow IOBuf.user_data to get
+//     access to state-information including semaphores.  If someone calls
+//     aws_iobuf_reset() in such a way that user_data is NULL at exactly
+//     the moment that the readfunc/writefunc dereferences it, then the
+//     func will segfault.  [Q: Yeah, but what are the changes of that ever
+//     happening? A: 100%.  I'm looking at it right now, in the debugger.]
+//
+//     THEREFORE: we can not temporarily wipe everything and then restore
+//     the fields we care about.  That approach was more flexible, but is
+//     vulnerable to the problem mentioned above.
+//
+//     To assuage the maximal paranoia, we could lock the object during
+//     reset, and acquire the lock in all access functions.  However,
+//     really, the main issue for MarFS is IOBuf.user_data.  As long as we
+//     don't screw with that, MarFS can correctly manage locking around
+//     access to all the other fields.
+
 void aws_iobuf_reset(IOBuf* bf) {
 
   /// Release local contents of the IOBuf
@@ -1028,6 +1047,7 @@ void aws_iobuf_reset(IOBuf* bf) {
 
   aws_metadata_reset(&bf->meta);
 
+#if 0
   // prepare to wipe the base IOBuf clean
   // (except for read_fn, write_fn, growth_size, user_data)
   HeaderFnPtr header_fn   = bf->header_fn;
@@ -1046,6 +1066,38 @@ void aws_iobuf_reset(IOBuf* bf) {
   bf->growth_size = growth_size;
   bf->user_data   = user_data;
   bf->context     = ctx;
+
+#else
+  // see NOTE above.  Explicitly reset only the expendible fields, leaving
+  // the others intact.
+
+  bf->first = NULL;
+  bf->last  = NULL;
+  // bf->header_fn = NULL;  // [*] libcurl parsing the response header
+
+  bf->reading  = NULL;
+  bf->read_pos = NULL;
+  // bf->write_fn = NULL;   // [*] libcurl adding data to the IOBuf (during GET)
+
+  bf->writing = NULL;
+  // bf->read_fn = NULL;    // [*] libcurl sending from the IOBuf (during PUT/POST)
+
+  bf->len         = 0;
+  bf->write_count = 0;
+  bf->avail       = 0;
+  // bf->growth_size = 0;   // [*] controls default growth, in aws_iobuf_append fns
+
+  bf->lastMod     = NULL;
+  bf->eTag        = NULL;
+  bf->contentLen  = 0;
+  bf->meta        = NULL;
+
+  bf->code        = 0;
+  bf->result      = NULL;
+
+  // bf->context = NULL;    // [*] optional, for thread-safety
+  // bf->user_data = NULL;  // [*] e.g. to pass extra info to a readfunc
+#endif
 }
 
 // Some fields are left untouched by aws_iobuf_reset().
