@@ -60,17 +60,17 @@
 */
 
 // S3Host and S3Proxy are initially static constants, but will be replaced
-// with dynamically-allocated strings.  This lets us know whether to free,
-// or not.
+// with dynamically-allocated strings.  The "_STATIC" flags let us know
+// whether to free, or not.
 typedef enum {
-   S3HOST_STATIC        = 0x01,
-   S3PROXY_STATIC       = 0x02,
-   AWS4C_CTE            = 0x04,
-   AWS4C_EMC_COMPAT     = 0x10,
-   AWS4C_SCALITY_COMPAT = 0x20,
-   AWS4C_SPROXYD        = 0x40,
-// @@@-HTTPS
-   AWS4C_HTTPS_INSECURE = 0x80,
+   S3HOST_STATIC        = 0x0001,
+   S3PROXY_STATIC       = 0x0002,
+   AWS4C_CTE            = 0x0004,
+   AWS4C_EMC_COMPAT     = 0x0010,
+   AWS4C_SCALITY_COMPAT = 0x0020,
+   AWS4C_SPROXYD        = 0x0040,
+   AWS4C_HTTPS          = 0x0080,
+   AWS4C_HTTPS_INSECURE = 0x0100,
 } AWS4C_FLAGS;
 
 
@@ -913,13 +913,27 @@ void s3_enable_Scality_extensions_r ( int value, AWSContext* ctx ) {
 
 /*
 @@@-HTTPS
-This will indicate if we are using HTTPS and want to disable certificate
-authentication (curl's -k or --insecure flags).
+This will indicate whether we are using HTTPS
 */
-void s3_enable_https ( int value ) {
-   s3_enable_https_r(value, &default_ctx);
+void s3_https ( int value ) {
+   s3_https_r(value, &default_ctx);
 }
-void s3_enable_https_r ( int value, AWSContext* ctx ) {
+void s3_https_r ( int value, AWSContext* ctx ) {
+   if (value) {
+      ctx->flags |= AWS4C_HTTPS;
+   } else {
+      ctx->flags &= ~(AWS4C_HTTPS);
+   }
+}
+
+/*
+If using https, this indicates we want to disable certificate
+authentication (curl's -k or --insecure flags).
+ */
+void s3_https_insecure ( int value ) {
+   s3_https_insecure_r(value, &default_ctx);
+}
+void s3_https_insecure_r ( int value, AWSContext* ctx ) {
    if (value) {
       ctx->flags |= AWS4C_HTTPS_INSECURE;
    } else {
@@ -1880,7 +1894,8 @@ s3_do_put_or_post ( IOBuf *read_b, char * const signature,
   if (chunked)
      slist = curl_slist_append(slist, "Transfer-Encoding: chunked");
 
-  snprintf ( Buf, sizeof(Buf), "http://%s/%s", ctx->S3Host , resource );
+  snprintf ( Buf, sizeof(Buf), "http%s://%s/%s",
+             ((ctx->flags & AWS4C_HTTPS) ? "s" : ""), ctx->S3Host , resource );
 
   curl_easy_setopt ( ch, CURLOPT_HTTPHEADER, slist);
 // @@@-HTTPS
@@ -2006,7 +2021,8 @@ s3_do_get ( IOBuf* b, char* const signature,
      slist = curl_slist_append(slist, Buf );
   }
 
-  snprintf ( Buf, sizeof(Buf), "http://%s/%s", ctx->S3Host, resource );
+  snprintf ( Buf, sizeof(Buf), "http%s://%s/%s",
+             ((ctx->flags & AWS4C_HTTPS) ? "s" : ""), ctx->S3Host, resource );
 
   curl_easy_setopt ( ch, CURLOPT_HTTPHEADER, slist);
 // @@@-HTTPS
@@ -2084,7 +2100,8 @@ s3_do_delete ( IOBuf *b, char * const signature,
      slist = curl_slist_append(slist, Buf );
   }
 
-  snprintf ( Buf, sizeof(Buf), "http://%s/%s", ctx->S3Host, resource );
+  snprintf ( Buf, sizeof(Buf), "http%s://%s/%s",
+             ((ctx->flags & AWS4C_HTTPS) ? "s" : ""), ctx->S3Host, resource );
 
   curl_easy_setopt ( ch, CURLOPT_CUSTOMREQUEST, "DELETE");
   curl_easy_setopt ( ch, CURLOPT_HTTPHEADER, slist);
@@ -2163,7 +2180,7 @@ int sqs_create_queue ( IOBuf *b, char * const name )
   char * signature = NULL;
   
   char * Req = 
-    "http://%s/"
+    "http%s://%s/"
     "?Action=CreateQueue"
     "&QueueName=%s"
     "&AWSAccessKeyId=%s"
@@ -2176,13 +2193,13 @@ int sqs_create_queue ( IOBuf *b, char * const name )
                 "Timestamp%sVersion2009-02-01";
 
   date = __aws_get_iso_date();
-  snprintf ( customSign, sizeof(customSign),
-             Sign, ctx->awsKeyID, name, date );
-
+  snprintf ( customSign, sizeof(customSign), Sign,
+             ctx->awsKeyID, name, date );
   signature =  SQSSign ( customSign, ctx );
 
-  snprintf ( resource, sizeof(resource),
-             ctx->SQSHost, Req , name, ctx->awsKeyID, signature, date );
+  snprintf ( resource, sizeof(resource), ctx->SQSHost,
+             ((ctx->flags & AWS4C_HTTPS) ? "s" : ""),
+             Req , name, ctx->awsKeyID, signature, date );
 
   int sc = SQSRequest( b, "POST", resource ); 
   free ( signature );
@@ -2207,7 +2224,7 @@ int sqs_list_queues ( IOBuf *b, char * const prefix )
   char * signature = NULL;
   
   char * Req = 
-    "http://%s/"
+    "http%s://%s/"
     "?Action=ListQueues"
     "&QueueNamePrefix=%s"
     "&AWSAccessKeyId=%s"
@@ -2220,13 +2237,13 @@ int sqs_list_queues ( IOBuf *b, char * const prefix )
                 "Timestamp%sVersion2009-02-01";
 
   date = __aws_get_iso_date  ();
-  snprintf ( customSign, sizeof(customSign),
-             Sign, ctx->awsKeyID, prefix, date );
-
+  snprintf ( customSign, sizeof(customSign), Sign,
+             ctx->awsKeyID, prefix, date );
   signature =  SQSSign ( customSign, ctx );
 
-  snprintf ( resource, sizeof(resource),
-             Req, ctx->SQSHost, prefix, ctx->awsKeyID, signature, date );
+  snprintf ( resource, sizeof(resource), Req,
+             ((ctx->flags & AWS4C_HTTPS) ? "s" : ""),
+             ctx->SQSHost, prefix, ctx->awsKeyID, signature, date );
 
   IOBuf *nb = aws_iobuf_new();
   int sc = SQSRequest( nb, "POST", resource ); 
