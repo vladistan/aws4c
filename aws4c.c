@@ -1373,6 +1373,7 @@ size_t aws_iobuf_getline   ( IOBuf * B, char * Line, size_t size )
 //
 // TBD: Should just memmove() portions of IOBufNodes, instead of this
 //      careful per-character loop.
+#if 0
 size_t aws_iobuf_get_raw   ( IOBuf * B, char * Line, size_t size )
 {
   size_t ln = 0;
@@ -1402,6 +1403,54 @@ size_t aws_iobuf_get_raw   ( IOBuf * B, char * Line, size_t size )
   B->avail -= ln;
   return ln;
 }
+
+#else
+// Move <size> bytes from <B> into <Line>.
+// This version uses memcpy() to move chunks of data, from successive IOBufNodes.
+size_t aws_iobuf_get_raw   ( IOBuf * B, char * Line, size_t size )
+{
+  ///  memset ( Line, 0, size );
+
+  if ( B->reading == NULL )
+    return 0;
+
+  // This is the "terminal 0" added by aws_iobuf_append().
+  // It marks an illegal position at the end of an IOBuf.
+  // This works for ascii or binary data.
+  char*  dest    = Line;
+  char*  buf_end = B->reading->buf + B->reading->write_count;
+  size_t moved = 0;
+
+  while ( moved < size ) {
+
+     // move to next IOBufNode, if necessary
+     if ( B->read_pos == buf_end ) {
+        B->reading = B->reading->next;
+        if ( B->reading == NULL )
+           break;
+
+        B->read_pos = B->reading->buf;
+        buf_end     = B->reading->buf + B->reading->write_count;
+        continue;
+     }
+
+     // copy raw data from this IOBufNode
+     size_t remain = (buf_end - B->read_pos); /* in this IOBufNode buffer */
+     size_t move   = (size - moved);          /* to finish with <size> */
+     if (remain < move)
+        move = remain;
+
+     memcpy(dest, B->read_pos, move);
+
+     dest        += move;
+     B->read_pos += move;
+     moved       += move;
+  }
+
+  B->avail -= moved;
+  return moved;
+}
+#endif
 
 
 // install (a pointer to) a custom header-function onto the IOBuf.
