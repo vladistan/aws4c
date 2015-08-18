@@ -531,7 +531,7 @@ static AWSContext* aws_context_new_internal() {
    return ctx;
 }
 
-void aws_context_reset() { // reset the default connection
+void aws_context_reset() { // reset the default context
    aws_context_reset_r(&default_ctx);
 }
 
@@ -621,14 +621,25 @@ void aws_reuse_connections_r(int val, AWSContext* ctx) {
 // drop client-side caches after writing, which may artificially enhance
 // read-bandwidth.  If reuse_connections is non-zero, connections will
 // still be reused, after the one-time reset.
+//
+// NOTE: This will only take effect on the next entry()
 void aws_reset_connection() {
    aws_reset_connection_r(&default_ctx);
 }
 void aws_reset_connection_r(AWSContext* ctx) {
    if (ctx->inside)
       curl_easy_setopt(ctx->ch, CURLOPT_FORBID_REUSE, 1); /* current request */
-   else
-      ctx->reset_connection = 1;     /* next request */
+   else {
+      // ctx->reset_connection = 1;     /* next request */
+
+      // Forcibly close the connection now.  We might not ever use this
+      // connection again, and we don't want the corresponding
+      // file-descriptor to sit around in CLOSE_WAIT state.  [Copied from
+      // aws_curl_enter().]
+      curl_easy_cleanup(ctx->ch);
+      ctx->ch = NULL;                  /* this is safe, after curl_easy_cleanup() */
+   }
+
 }
 
 
