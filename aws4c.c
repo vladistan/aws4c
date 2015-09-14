@@ -2113,9 +2113,16 @@ s3_do_get ( IOBuf* b, char* const signature,
   slist = curl_slist_append(slist, "ETag: \"6ea58533db38eca2c2cc204b7550aab6\"");
 
   if (ctx->byte_range.length) {
-     snprintf ( Buf, sizeof(Buf), "Range: bytes=%ld-%ld",
-                ctx->byte_range.offset,
-                ctx->byte_range.offset + ctx->byte_range.length -1);
+     if (ctx->byte_range.length == (size_t)-1) {
+        // open-ended, starting at a given offset
+        snprintf ( Buf, sizeof(Buf), "Range: bytes=%ld-",
+                   ctx->byte_range.offset);
+     }
+     else {
+        snprintf ( Buf, sizeof(Buf), "Range: bytes=%ld-%ld",
+                   ctx->byte_range.offset,
+                   ctx->byte_range.offset + ctx->byte_range.length -1);
+     }
      slist = curl_slist_append(slist, Buf);
      memset(&ctx->byte_range, 0, sizeof(ByteRange));       /* reset after each use */
   }
