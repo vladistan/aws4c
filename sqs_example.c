@@ -58,7 +58,7 @@ void DumpResult ( int rv, IOBuf * bf )
 
 int main ( int argc, char * argv[] )
 {
-  char * queueURL;
+  char * queueURL = NULL;
 
   /// Initialize the library.
   aws_init ();

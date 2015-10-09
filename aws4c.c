@@ -923,7 +923,6 @@ void s3_enable_Scality_extensions_r ( int value, AWSContext* ctx ) {
 
 
 /*
-@@@-HTTPS
 This will indicate whether we are using HTTPS
 */
 void s3_https ( int value ) {
@@ -974,13 +973,13 @@ void s3_chunked_transfer_encoding_r ( int value, AWSContext* ctx ) {
 // Use Scality's sproxyd, which just amounts to removing the encrypted auth
 // header, from S3.
 void s3_sproxyd ( int value ) {
-   s3_chunked_transfer_encoding_r(value, &default_ctx);
+   s3_sproxyd_r(value, &default_ctx);
 }
 void s3_sproxyd_r ( int value, AWSContext* ctx ) {
    if (value)
-      ctx->flags |= AWS4C_CTE;
+      ctx->flags |= AWS4C_SPROXYD;
    else
-      ctx->flags &= ~(AWS4C_CTE);
+      ctx->flags &= ~(AWS4C_SPROXYD);
 }
 
 
@@ -1293,6 +1292,9 @@ void   aws_iobuf_extend_internal (IOBuf* b,
                                   char*  d,
                                   size_t len,
                                   int    is_static) {
+
+   if (!len)
+      return;
 
    // new IOBufNode, to add into <b>
    IOBufNode * N = malloc(sizeof(IOBufNode)); /* new node-ptr */
@@ -1687,7 +1689,6 @@ static int SQSRequest ( IOBuf *b, char * verb, char * const url )
 
   struct curl_slist *slist=NULL;
 
-// @@@-HTTPS
   if ( ctx->flags & AWS4C_HTTPS_INSECURE ) {
      curl_easy_setopt( ch, CURLOPT_SSL_VERIFYPEER, 0L );
      curl_easy_setopt( ch, CURLOPT_SSL_VERIFYHOST, 0L );
@@ -2010,7 +2011,6 @@ s3_do_put_or_post ( IOBuf *read_b, char * const signature,
              ((ctx->flags & AWS4C_HTTPS) ? "s" : ""), ctx->S3Host , resource );
 
   curl_easy_setopt ( ch, CURLOPT_HTTPHEADER, slist);
-// @@@-HTTPS
   if ( ctx->flags & AWS4C_HTTPS_INSECURE ) {
      curl_easy_setopt( ch, CURLOPT_SSL_VERIFYPEER, 0L );
      curl_easy_setopt( ch, CURLOPT_SSL_VERIFYHOST, 0L );
@@ -2144,7 +2144,6 @@ s3_do_get ( IOBuf* b, char* const signature,
              ((ctx->flags & AWS4C_HTTPS) ? "s" : ""), ctx->S3Host, resource );
 
   curl_easy_setopt ( ch, CURLOPT_HTTPHEADER, slist);
-// @@@-HTTPS
   if ( ctx->flags & AWS4C_HTTPS_INSECURE ) {
      curl_easy_setopt( ch, CURLOPT_SSL_VERIFYPEER, 0L );
      curl_easy_setopt( ch, CURLOPT_SSL_VERIFYHOST, 0L );
@@ -2224,7 +2223,6 @@ s3_do_delete ( IOBuf *b, char * const signature,
 
   curl_easy_setopt ( ch, CURLOPT_CUSTOMREQUEST, "DELETE");
   curl_easy_setopt ( ch, CURLOPT_HTTPHEADER, slist);
-// @@@-HTTPS
   if ( ctx->flags & AWS4C_HTTPS_INSECURE ) {
      curl_easy_setopt( ch, CURLOPT_SSL_VERIFYPEER, 0L );
      curl_easy_setopt( ch, CURLOPT_SSL_VERIFYHOST, 0L );

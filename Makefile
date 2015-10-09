@@ -11,7 +11,13 @@ XML_INC_DIR = /usr/include/libxml2
 
 
 
-CFLAGS = -g -Wall -I $(XML_INC_DIR) -L .
+ifdef DEBUG
+	CFLAGS = -g
+else
+	CFLAGS = -O3
+endif
+CFLAGS += -Wall -I $(XML_INC_DIR) -L .
+
 
 # -laws4c -laws4c_extra -lcurl -lxml2 -lcrypto
 LDLIBS = `curl-config --libs` -lcrypto

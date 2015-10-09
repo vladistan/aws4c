@@ -39,7 +39,7 @@ extern "C" {
 // this:
 //
 //     AWS4C_CHECK( s3_head( my_iobuf, obj_name) );
-//     AWS4C_CHECK_OK( my_iobuf) );
+//     AWS4C_CHECK_OK( my_iobuf );
 
 
 
@@ -60,7 +60,7 @@ extern "C" {
       if ( rc != CURLE_OK ) {                                           \
          fprintf(stderr, "libcurl call failed at %s, line %d\nERROR: %s\n", \
                  __FILE__, __LINE__, curl_easy_strerror(rc));           \
-         return(1);                                                     \
+         return(rc);  /* guranteed non-zero */                          \
       }                                                                 \
    } while (0)
 
@@ -115,7 +115,6 @@ void s3_set_byte_range( size_t offset, size_t length );
 void s3_enable_EMC_extensions     ( int value );
 void s3_enable_Scality_extensions ( int value );
 
-// @@@-HTTPS
 void s3_https		           ( int value );
 void s3_https_insecure		  ( int value );
 void s3_chunked_transfer_encoding ( int value );
@@ -193,7 +192,6 @@ void s3_set_byte_range_r( size_t offset, size_t length, AWSContext* ctx );
 void s3_enable_EMC_extensions_r     ( int value, AWSContext* ctx );
 void s3_enable_Scality_extensions_r ( int value, AWSContext* ctx );
 
-// @@@-HTTPS
 void s3_https_r		             ( int value, AWSContext* ctx );
 void s3_https_insecure_r		    ( int value, AWSContext* ctx );
 void s3_chunked_transfer_encoding_r ( int value, AWSContext* ctx );
