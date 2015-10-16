@@ -83,11 +83,9 @@ typedef enum {
 // state (e.g. aws_set_id_r(), or s3_set_host_r()), and install that
 // context into your IOBuf (i.e. with aws_iobuf_set_context()).
 
-// NOTE: This is initialized in aws_init(), by a call to aws_context_new()
-// static AWSContext* default_ctx = NULL;
-
 // NOTE: This is initialized in aws_init(), by a call to aws_context_reset_r()
 static AWSContext default_ctx;
+
 
 // <debug> is still global, for now.  It would take some work to thread an
 // AWSContext into all the places that call __debug()
@@ -559,7 +557,9 @@ void aws_context_reset_r(AWSContext* ctx) {
       .MimeType = NULL,
       .AccessControl = NULL,
 
-      .byte_range = {0, 0},        /* resets automatically, after next GET */
+      .byte_range = {0, 0},    /* resets automatically, after next GET */
+      .content_length = 0,     /* resets automatically, after next PUT/POST */
+
       .flags = (S3HOST_STATIC | S3PROXY_STATIC), /*  */
    };
 }
@@ -658,7 +658,6 @@ void aws_reset_connection_r(AWSContext* ctx) {
 CURLcode aws_init () {
    CURLcode rc = curl_global_init(CURL_GLOBAL_ALL);
    if (rc == CURLE_OK)
-      // default_ctx = aws_context_new();
       aws_context_reset_r(&default_ctx);
    return rc;
 }
@@ -873,6 +872,17 @@ void s3_set_byte_range   ( size_t offset, size_t length ) {
 void s3_set_byte_range_r ( size_t offset, size_t length, AWSContext* ctx ) {
    ctx->byte_range.offset = offset;
    ctx->byte_range.length = length;
+}
+
+/// Set content-length.  NOTE: resets after the next PUT or POST
+///
+/// NOTE: This apparently doesn't work correctly!
+///       Do not use this, for now.
+void s3_set_content_length   ( curl_off_t length ) {
+   s3_set_content_length_r( length, &default_ctx);
+}
+void s3_set_content_length_r ( curl_off_t length, AWSContext* ctx ) {
+   ctx->content_length = length;
 }
 
 /// Set S3 AccessControl
@@ -1982,6 +1992,13 @@ s3_do_put_or_post ( IOBuf *read_b, char * const signature,
      memset(&ctx->byte_range, 0, sizeof(ByteRange));       /* reset after each use */
   }
 
+  // NOTE: The "INFILESIZE_LARGE" option apparently doesn't do this:
+  if (ctx->content_length) {
+     snprintf ( Buf, sizeof(Buf), "Content-Length: %ld", ctx->content_length);
+     slist = curl_slist_append(slist, Buf);
+     // ctx->content_length = 0;      /* reset after each use */
+  }
+
   snprintf ( Buf, sizeof(Buf), "Date: %s", date );
   slist = curl_slist_append(slist, Buf );
 
@@ -2011,20 +2028,32 @@ s3_do_put_or_post ( IOBuf *read_b, char * const signature,
              ((ctx->flags & AWS4C_HTTPS) ? "s" : ""), ctx->S3Host , resource );
 
   curl_easy_setopt ( ch, CURLOPT_HTTPHEADER, slist);
+
+
+  // This doesn't work, to create a "Content-Length: ..." header.
+  // See the slist approach, above.
+  if (ctx->content_length) {
+     curl_easy_setopt( ch, CURLOPT_INFILESIZE_LARGE, ctx->content_length );
+  }
+  else
+     curl_easy_setopt( ch, CURLOPT_INFILESIZE_LARGE, -1L );
+  ctx->content_length = 0;      /* reset after each use */
+
   if ( ctx->flags & AWS4C_HTTPS_INSECURE ) {
      curl_easy_setopt( ch, CURLOPT_SSL_VERIFYPEER, 0L );
      curl_easy_setopt( ch, CURLOPT_SSL_VERIFYHOST, 0L );
   }
+
   curl_easy_setopt ( ch, CURLOPT_URL, Buf );
   curl_easy_setopt ( ch, CURLOPT_VERBOSE, debug );
-  curl_easy_setopt ( ch, CURLOPT_UPLOAD, 1 );
   curl_easy_setopt ( ch, CURLOPT_FOLLOWLOCATION, 1 );
+  curl_easy_setopt ( ch, CURLOPT_NOPROGRESS, 1 );
+  curl_easy_setopt ( ch, CURLOPT_HTTP_CONTENT_DECODING, 0 );
 
   curl_easy_setopt ( ch, CURLOPT_HEADERDATA, read_b ); /* keeping original code */
   curl_easy_setopt ( ch, CURLOPT_HEADERFUNCTION, ( read_b->header_fn
                                                    ? *(read_b->header_fn)
                                                    : aws_headerfunc) );
-
   if (ctx->S3Proxy)
      curl_easy_setopt ( ch, CURLOPT_PROXY, ctx->S3Proxy);
 
@@ -2077,9 +2106,10 @@ s3_do_put_or_post ( IOBuf *read_b, char * const signature,
     //    curl_easy_setopt ( ch, CURLOPT_POSTFIELDS, "uploads" ); /* DEBUGGING */
     curl_easy_setopt(ch, CURLOPT_CUSTOMREQUEST, "POST");
   }
-  else
+  else {
     curl_easy_setopt(ch, CURLOPT_PUT, 1);
-
+    curl_easy_setopt (ch, CURLOPT_UPLOAD, 1);
+  }
 
   CURLcode sc  = curl_easy_perform(ch);
   __debug ( "Return Code: %d ", sc );
@@ -2150,6 +2180,8 @@ s3_do_get ( IOBuf* b, char* const signature,
   }
   curl_easy_setopt ( ch, CURLOPT_URL, Buf );
   curl_easy_setopt ( ch, CURLOPT_VERBOSE, debug );
+  curl_easy_setopt ( ch, CURLOPT_NOPROGRESS, 1 );
+  curl_easy_setopt ( ch, CURLOPT_HTTP_CONTENT_DECODING, 0 );
 
   curl_easy_setopt ( ch, CURLOPT_HEADERDATA, b );
   curl_easy_setopt ( ch, CURLOPT_HEADERFUNCTION, (b->header_fn ? b->header_fn : aws_headerfunc) );
