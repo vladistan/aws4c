@@ -246,7 +246,8 @@ size_t aws_readfunc ( void * ptr, size_t size, size_t nmemb, void * stream )
   char * Ln = ptr;
   // int sz = aws_iobuf_getline ( stream, ptr, size*nmemb);
   size_t sz = aws_iobuf_get_raw ( stream, ptr, size*nmemb);
-  __debug ( "Sent[%3lu] %s", sz, Ln );
+  // __debug ( "Sent[%3lu] %s", sz, Ln );
+  __debug ( "Sent[%3lu]", sz );
   return sz;
 }
 
@@ -1961,7 +1962,7 @@ s3_do_put_or_post ( IOBuf *read_b, char * const signature,
 
   int chunked = (ctx->flags & AWS4C_CTE);
 
-  // accumulate all custom headers into <slist>
+  // --- CUSTOM HEADERS
   struct curl_slist *slist=NULL;
   if (ctx->MimeType) {
     snprintf ( Buf, sizeof(Buf), "Content-Type: %s", ctx->MimeType );
@@ -1992,12 +1993,12 @@ s3_do_put_or_post ( IOBuf *read_b, char * const signature,
      memset(&ctx->byte_range, 0, sizeof(ByteRange));       /* reset after each use */
   }
 
-  // NOTE: The "INFILESIZE_LARGE" option apparently doesn't do this:
-  if (ctx->content_length) {
-     snprintf ( Buf, sizeof(Buf), "Content-Length: %ld", ctx->content_length);
-     slist = curl_slist_append(slist, Buf);
-     // ctx->content_length = 0;      /* reset after each use */
-  }
+  //  // NOTE: The "INFILESIZE_LARGE" option apparently doesn't do this:
+  //  if (ctx->content_length) {
+  //     snprintf ( Buf, sizeof(Buf), "Content-Length: %ld", ctx->content_length);
+  //     slist = curl_slist_append(slist, Buf);
+  //     // ctx->content_length = 0;      /* reset after each use */
+  //  }
 
   snprintf ( Buf, sizeof(Buf), "Date: %s", date );
   slist = curl_slist_append(slist, Buf );
@@ -2030,15 +2031,8 @@ s3_do_put_or_post ( IOBuf *read_b, char * const signature,
   curl_easy_setopt ( ch, CURLOPT_HTTPHEADER, slist);
 
 
-  // This doesn't work, to create a "Content-Length: ..." header.
-  // See the slist approach, above.
-  if (ctx->content_length) {
-     curl_easy_setopt( ch, CURLOPT_INFILESIZE_LARGE, ctx->content_length );
-  }
-  else
-     curl_easy_setopt( ch, CURLOPT_INFILESIZE_LARGE, -1L );
-  ctx->content_length = 0;      /* reset after each use */
 
+  // --- OPTIONS
   if ( ctx->flags & AWS4C_HTTPS_INSECURE ) {
      curl_easy_setopt( ch, CURLOPT_SSL_VERIFYPEER, 0L );
      curl_easy_setopt( ch, CURLOPT_SSL_VERIFYHOST, 0L );
@@ -2095,9 +2089,18 @@ s3_do_put_or_post ( IOBuf *read_b, char * const signature,
                                                    ? *(read_b->read_fn)
                                                    : aws_readfunc) );
 
-     if (! chunked)
-        curl_easy_setopt ( ch, CURLOPT_INFILESIZE, read_b->write_count );
+     if (ctx->content_length) {
+        curl_easy_setopt( ch, CURLOPT_INFILESIZE_LARGE, ctx->content_length );
+     }
+     else if (chunked)
+        curl_easy_setopt( ch, CURLOPT_INFILESIZE_LARGE, -1L );
+     else
+        curl_easy_setopt ( ch, CURLOPT_INFILESIZE_LARGE, read_b->write_count );
   }
+
+  ctx->content_length = 0;      /* reset after each use */
+
+
 
 
   // if <post_p> is non-zero, use POST, instead of PUT
