@@ -2100,7 +2100,7 @@ s3_do_put_or_post ( IOBuf *read_b, char * const signature,
      else if (chunked)
         curl_easy_setopt( ch, CURLOPT_INFILESIZE_LARGE, -1L );
      else
-        curl_easy_setopt ( ch, CURLOPT_INFILESIZE_LARGE, read_b->write_count );
+        curl_easy_setopt ( ch, CURLOPT_INFILESIZE_LARGE, (curl_off_t)read_b->write_count );
   }
 
   ctx->content_length = 0;      /* reset after each use */
@@ -2182,7 +2182,7 @@ s3_do_get ( IOBuf* b, char* const signature,
              ((ctx->flags & AWS4C_HTTPS) ? "s" : ""), ctx->S3Host, resource );
 
 
-#if ((LIBCURL_VERSION_MAJOR >= 7) && (LIBCURL_VERSION_MINOR >= 38))
+#if (LIBCURL_VERSION_MAJOR > 7) || ((LIBCURL_VERSION_MAJOR == 7) && (LIBCURL_VERSION_MINOR >= 45))
   // allow 10 seconds for delays in Expect-100 timeout
   curl_easy_setopt( ch, CURLOPT_EXPECT_100_TIMEOUT_MS, 10000UL);
 #endif
