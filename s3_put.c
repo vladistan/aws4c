@@ -171,7 +171,7 @@ int main ( int argc, char * argv[] )
   aws_set_rrs ( 1 ) ;
 
   char dest[1024];
-  sprintf(dest, "%.rrs", obj_name);
+  sprintf(dest, "%s.rrs", obj_name);
   rv = putObject ( dest, bf );
 
   printf ( "RV %d\n", rv );

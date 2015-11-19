@@ -520,7 +520,7 @@ static void __aws_urlencode ( char * src, char * dest, int nDest )
 */
 
 
-// For internal consumption only.  return an uniitialized new AWSContext.
+// For internal consumption only.  return an uninitialized new AWSContext.
 static AWSContext* aws_context_new_internal() {
    AWSContext* ctx = (AWSContext*)malloc(sizeof(AWSContext));
    if (!ctx) {
@@ -876,9 +876,6 @@ void s3_set_byte_range_r ( size_t offset, size_t length, AWSContext* ctx ) {
 }
 
 /// Set content-length.  NOTE: resets after the next PUT or POST
-///
-/// NOTE: This apparently doesn't work correctly!
-///       Do not use this, for now.
 void s3_set_content_length   ( curl_off_t length ) {
    s3_set_content_length_r( length, &default_ctx);
 }
@@ -1059,71 +1056,86 @@ void iobuf_node_list_free(IOBufNode* n) {
 
 void aws_iobuf_reset(IOBuf* bf) {
 
+   aws_iobuf_reset_lite(bf);
+
   /// Release local contents of the IOBuf
-  if ( bf->result  ) free ( bf->result  );
-  if ( bf->lastMod ) free ( bf->lastMod );
-  if ( bf->eTag    ) free ( bf->eTag    );
+  if (bf->result)  free(bf->result);
+  if (bf->lastMod) free(bf->lastMod);
+  if (bf->eTag)    free(bf->eTag);
 
-  iobuf_node_list_free(bf->first);
+   bf->code        = 0;
+   bf->result      = NULL;
+   bf->lastMod     = NULL;
+   bf->eTag        = NULL;
+   bf->contentLen  = 0;
+}
 
-  aws_metadata_reset(&bf->meta);
+
+// NOTE: MarFS also uses reset during ongoing GET operations, to wipe the
+//     IOBufNodes.  In this case, the writeheaderfunc may already have
+//     parsed the response headers.  The GET only wants to reset the
+//     buffers; not the parsed headers (e.g. in IOBuf.result, lastMod,
+//     eTag, etc).  These fields will be needed later, to assess the
+//     response fromt he server.  So we break out aws_iobuf_reset_lite()
+//     to do just that.
+
+void aws_iobuf_reset_lite(IOBuf* bf) {
+
+   iobuf_node_list_free(bf->first);
+
+   aws_metadata_reset(&bf->meta);
 
 #if 0
-  // prepare to wipe the base IOBuf clean
-  // (except for read_fn, write_fn, growth_size, user_data)
-  HeaderFnPtr header_fn   = bf->header_fn;
-  WriteFnPtr  write_fn    = bf->write_fn;
-  ReadFnPtr   read_fn     = bf->read_fn;
-  size_t      growth_size = bf->growth_size;
-  void*       user_data   = bf->user_data;
-  AWSContext* ctx         = bf->context;
+   // prepare to wipe the base IOBuf clean
+   // (except for read_fn, write_fn, growth_size, user_data)
+   HeaderFnPtr header_fn   = bf->header_fn;
+   WriteFnPtr  write_fn    = bf->write_fn;
+   ReadFnPtr   read_fn     = bf->read_fn;
+   size_t      growth_size = bf->growth_size;
+   void*       user_data   = bf->user_data;
+   AWSContext* ctx         = bf->context;
 
-  memset(bf, 0, sizeof(IOBuf));
+   memset(bf, 0, sizeof(IOBuf));
 
-  // restore fields that are not to be wiped during a reset
-  bf->header_fn   = header_fn;
-  bf->write_fn    = write_fn;
-  bf->read_fn     = read_fn;
-  bf->growth_size = growth_size;
-  bf->user_data   = user_data;
-  bf->context     = ctx;
+   // restore fields that are not to be wiped during a reset
+   bf->header_fn   = header_fn;
+   bf->write_fn    = write_fn;
+   bf->read_fn     = read_fn;
+   bf->growth_size = growth_size;
+   bf->user_data   = user_data;
+   bf->context     = ctx;
 
 #else
-  // see NOTE above.  Explicitly reset only the expendible fields, leaving
-  // the others intact.
+   // see NOTE above.  Explicitly reset only the expendible fields, leaving
+   // the others intact.
 
-  bf->first = NULL;
-  bf->last  = NULL;
-  // bf->header_fn = NULL;  // [*] libcurl parsing the response header
+   bf->first = NULL;
+   bf->last  = NULL;
+   // bf->header_fn = NULL;  // [*] libcurl parsing the response header
 
-  bf->reading  = NULL;
-  bf->read_pos = NULL;
-  // bf->write_fn = NULL;   // [*] libcurl adding data to the IOBuf (during GET)
+   bf->reading  = NULL;
+   bf->read_pos = NULL;
+   // bf->write_fn = NULL;   // [*] libcurl adding data to the IOBuf (during GET)
 
-  bf->writing = NULL;
-  // bf->read_fn = NULL;    // [*] libcurl sending from the IOBuf (during PUT/POST)
+   bf->writing = NULL;
+   // bf->read_fn = NULL;    // [*] libcurl sending from the IOBuf (during PUT/POST)
 
-  bf->len         = 0;
-  bf->write_count = 0;
-  bf->avail       = 0;
-  // bf->growth_size = 0;   // [*] controls default growth, in aws_iobuf_append fns
+   bf->len         = 0;
+   bf->write_count = 0;
+   bf->avail       = 0;
+   // bf->growth_size = 0;   // [*] controls default growth, in aws_iobuf_append fns
 
-  bf->lastMod     = NULL;
-  bf->eTag        = NULL;
-  bf->contentLen  = 0;
-  bf->meta        = NULL;
+   bf->meta        = NULL;
 
-  bf->code        = 0;
-  bf->result      = NULL;
-
-  // bf->context = NULL;    // [*] optional, for thread-safety
-  // bf->user_data = NULL;  // [*] e.g. to pass extra info to a readfunc
+   // bf->context = NULL;    // [*] optional, for thread-safety
+   // bf->user_data = NULL;  // [*] e.g. to pass extra info to a readfunc
 #endif
 }
 
 // Some fields are left untouched by aws_iobuf_reset().
 void aws_iobuf_reset_hard(IOBuf* b) {
    aws_iobuf_reset(b);
+
    aws_context_free_r(b->context);
    memset(b, 0, sizeof(IOBuf));
 }
@@ -2034,7 +2046,7 @@ s3_do_put_or_post ( IOBuf *read_b, char * const signature,
 
   // --- OPTIONS
 
-#if ((LIBCURL_VERSION_MAJOR >= 7) && (LIBCURL_VERSION_MINOR >= 38))
+#if (LIBCURL_VERSION_MAJOR > 7) || ((LIBCURL_VERSION_MAJOR == 7) && (LIBCURL_VERSION_MINOR >= 36))
   // allow 10 seconds for delays in Expect-100 timeout
   curl_easy_setopt( ch, CURLOPT_EXPECT_100_TIMEOUT_MS, 10000UL);
 #endif
@@ -2182,9 +2194,11 @@ s3_do_get ( IOBuf* b, char* const signature,
              ((ctx->flags & AWS4C_HTTPS) ? "s" : ""), ctx->S3Host, resource );
 
 
-#if (LIBCURL_VERSION_MAJOR > 7) || ((LIBCURL_VERSION_MAJOR == 7) && (LIBCURL_VERSION_MINOR >= 45))
-  // allow 10 seconds for delays in Expect-100 timeout
+#if (LIBCURL_VERSION_MAJOR > 7) || ((LIBCURL_VERSION_MAJOR == 7) && (LIBCURL_VERSION_MINOR >= 36))
+  //  if (curl_version_info(CURLVERSION_NOW)->version_num >= 0x072400) {
+  //     // libcurl >= 7.36?  allow 10 seconds for Expect-100
   curl_easy_setopt( ch, CURLOPT_EXPECT_100_TIMEOUT_MS, 10000UL);
+  //  }
 #endif
 
   curl_easy_setopt ( ch, CURLOPT_HTTPHEADER, slist);

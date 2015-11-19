@@ -282,9 +282,10 @@ typedef struct IOBuf
 
 
 IOBuf* aws_iobuf_new ();
-void   aws_iobuf_reset      ( IOBuf* bf ); // leaves some fields untouched
-void   aws_iobuf_reset_hard ( IOBuf* bf ); // deep clean
-void   aws_iobuf_free       ( IOBuf* bf );
+void   aws_iobuf_reset     ( IOBuf* bf ); // leaves some fields untouched
+void   aws_iobuf_reset_lite(IOBuf* bf);   // leaves even more fields untouched
+void   aws_iobuf_reset_hard( IOBuf* bf ); // deep clean
+void   aws_iobuf_free      ( IOBuf* bf );
 
 void   aws_iobuf_growth_size (IOBuf* b, size_t size);
 
