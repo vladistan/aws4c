@@ -47,8 +47,7 @@ void s3_connect(char* host_ip, char* proxy_ip) {
    }
 	aws_reuse_connections(1);
 
-   // // fix this to match your site and testing target.
-	// snprintf(buff, BUFF_LEN, "%s:9020", host_ip);
+   // fix this to match your site and testing target.
    snprintf(buff, BUFF_LEN, "%s", host_ip);
 	s3_set_host(buff);
 
@@ -867,7 +866,14 @@ void test_streaming_write2(IOBuf* b) {
 
 void test_sproxyd_by_path(IOBuf* b) {
    const char* bkt = "proxy";   // not really an S3 bucket
-   const char* obj = "bparc/sproxyd_test";
+   char        obj[256];
+
+   // format the current time to create a (per-second) unique object-ID.
+   time_t      epoch = time(NULL);
+   struct tm*  local = localtime(&epoch);
+   char        time_str[128];
+   strftime(time_str, sizeof(time_str), "%Y%m%d_%H%M%S", local);
+   snprintf(obj, sizeof(obj), "jti/sproxyd_test_%s", time_str);
 
    aws_set_debug(1);
 
@@ -916,15 +922,18 @@ main(int argc, char* argv[]) {
    if ((argc < 3) || (argc > 4)) {
       usage(argv[0], 1);
    }
+
    char*             prog_name   = argv[0];
    char*             host_ip     = argv[1];
    unsigned long int test_number = strtoul(argv[2], NULL, 10);
    char*             proxy_ip    = ((argc > 3) ? argv[3] : NULL);
 
-   IOBuf* b = aws_iobuf_new();
-
+   aws_init();
    s3_connect(host_ip, proxy_ip);
    s3_set_bucket(TEST_BUCKET);
+
+   IOBuf* b = aws_iobuf_new();
+
 
    if (test_number < 100) {
 
@@ -942,7 +951,6 @@ main(int argc, char* argv[]) {
    }
 
 
-   //   aws_set_debug(1);
 
 
    printf("\nbeginning test %lu\n", test_number);
@@ -1110,6 +1118,7 @@ main(int argc, char* argv[]) {
 
 
 
+
       // ----------------------------------------------------------------------
       // if (test_number >= 100) we will not try to assure a bucket has been
       // created.  That's because these tests might not use buckets.  For
@@ -1127,6 +1136,12 @@ main(int argc, char* argv[]) {
       test_sproxyd_by_path(b);
       return 0;
 
+
+   case 101:
+      // --- do PUT/GET/DEL, using HTTP-digest user/pass authentication
+      s3_http_digest(1);
+      test_sproxyd_by_path(b);
+      return 0;
 
 
    default:

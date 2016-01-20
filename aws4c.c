@@ -71,6 +71,7 @@ typedef enum {
    AWS4C_SPROXYD        = 0x0040,
    AWS4C_HTTPS          = 0x0080,
    AWS4C_HTTPS_INSECURE = 0x0100,
+   AWS4C_HTTP_DIGEST    = 0x0200,
 } AWS4C_FLAGS;
 
 
@@ -243,12 +244,11 @@ static size_t aws_writedummyfunc ( void * ptr, size_t size, size_t nmemb, void *
 /// \return number of bytes written
 size_t aws_readfunc ( void * ptr, size_t size, size_t nmemb, void * stream )
 {
-  char * Ln = ptr;
-  // int sz = aws_iobuf_getline ( stream, ptr, size*nmemb);
-  size_t sz = aws_iobuf_get_raw ( stream, ptr, size*nmemb);
-  // __debug ( "Sent[%3lu] %s", sz, Ln );
-  __debug ( "Sent[%3lu]", sz );
-  return sz;
+   // char * Ln = ptr;
+   size_t sz = aws_iobuf_get_raw ( stream, ptr, size*nmemb);
+   // __debug ( "Sent[%3lu] %s", sz, Ln );
+   __debug ( "Sent[%3lu]", sz );
+   return sz;
 }
 
 /// Process incoming header
@@ -674,6 +674,12 @@ void aws_set_debug (int d) {
   debug = d;
 }
 
+// This is the first token in each colon-delimited line in the ~/.awsAuth
+// file.  It would typically correspond with a user's moniker, e.g. via
+// getenv("USER"), but really it could be any token that serves to identify
+// the rest of the line, which contains the user/pass for accessing the
+// object-store.
+//
 /// \brief Set AWS account ID to be read from .awsAuth file
 /// \param id new account ID
 void aws_set_id   ( char * const id ) {
@@ -685,6 +691,13 @@ void aws_set_id_r ( char * const id, AWSContext* ctx ) {
    ctx->ID = ((id == NULL) ? getenv("USER") : strdup(id));
 }
 
+// This is the second token in each colon-delimited line in the ~/.awsAuth
+// file.
+//
+// For AWS S3, the key is the "user", known to the object store, presented
+// unencrypted along with the encrypted header.  For CURL "digest" this is
+// the "user", known to the object-store.
+//
 /// Set AWS account access key
 /// \param key new AWS authentication key
 void aws_set_key   ( char * const key ) {
@@ -696,6 +709,15 @@ void aws_set_key_r ( char * const key, AWSContext* ctx ) {
    ctx->awsKey = ((key == NULL) ? NULL : strdup(key));
 }
 
+// This is the third token in each colon-delimited line in the ~/.awsAuth
+// file.  It represents the "password" (stored unencrypted), corresponding
+// to the "user" (installed via aws_set_key[_r]()), recognized by the
+// object-store.
+//
+// For AWS S3, the keyid is used to encrypt (aka "sign") the headers of
+// requests.  For CURL "digest" this is the password, encrypted by curl
+// before transmission.
+//
 /// Set AWS account access key ID
 /// \param keyid new AWS key ID
 void aws_set_keyid   ( char * const keyid ) {
@@ -718,7 +740,15 @@ void aws_set_rrs_r (int r, AWSContext* ctx) {
 
 
 
-
+// Lines in ~/.awsAuth are of the form  name:user:password
+// where:
+//   name  is any key to lookup user/password  (e.g. UNIX moniker)
+//   user  is a user-name known to the object-store     
+//   pass  is the password for user to access the object-store     
+//
+// These are now used for both AWS S3 header-encryption, and curl "digest"
+// mode.
+//
 /// Read AWS authentication records
 /// \param id  user ID
 int aws_read_config   ( char * const id ) {
@@ -760,14 +790,16 @@ int aws_read_config_r ( char * const id, AWSContext* ctx ) {
       printf ( "Syntax error in credentials file line %d, no keyid\n", ln );
       exit(1);
     }
-    *keyID = 0; keyID ++;
+    *keyID = 0;
+    keyID ++;
 
     char * key = strchr(keyID,':');
     if ( key == NULL ) {
       printf ( "Syntax error in credentials file line %d, no key\n", ln );
       exit(1);
     }
-    *key = 0; key ++;
+    *key = 0;
+    key ++;
       
       
     /// If the line is correct Set the IDs
@@ -988,6 +1020,20 @@ void s3_sproxyd_r ( int value, AWSContext* ctx ) {
       ctx->flags |= AWS4C_SPROXYD;
    else
       ctx->flags &= ~(AWS4C_SPROXYD);
+}
+
+
+
+// Use CURL's "digest" mode, which encrypts request headers with a
+// user/password, before sending over the wire.
+void s3_http_digest ( int value ) {
+   s3_http_digest_r(value, &default_ctx);
+}
+void s3_http_digest_r ( int value, AWSContext* ctx ) {
+   if (value)
+      ctx->flags |= AWS4C_HTTP_DIGEST;
+   else
+      ctx->flags &= ~(AWS4C_HTTP_DIGEST);
 }
 
 
@@ -2043,13 +2089,27 @@ s3_do_put_or_post ( IOBuf *read_b, char * const signature,
   curl_easy_setopt ( ch, CURLOPT_HTTPHEADER, slist);
 
 
-
   // --- OPTIONS
 
 #if (LIBCURL_VERSION_MAJOR > 7) || ((LIBCURL_VERSION_MAJOR == 7) && (LIBCURL_VERSION_MINOR >= 36))
   // allow 10 seconds for delays in Expect-100 timeout
   curl_easy_setopt( ch, CURLOPT_EXPECT_100_TIMEOUT_MS, 10000UL);
 #endif
+
+  // maybe use HTTP "digest" authentication
+  if (ctx->flags & AWS4C_HTTP_DIGEST) {
+
+     if (!ctx->awsKeyID || !ctx->awsKey) {
+        fprintf(stderr, "ERROR: PUT/POST in HTTP-digest mode, but user / password empty\n");
+        exit(1);
+     }
+     char user_pass[1024];
+     snprintf(user_pass, sizeof(user_pass), "%s:%s",
+              ctx->awsKeyID, ctx->awsKey);
+
+     curl_easy_setopt ( ch, CURLOPT_USERPWD, user_pass );
+     curl_easy_setopt ( ch, CURLOPT_HTTPAUTH, CURLAUTH_DIGEST );
+  }
 
   if ( ctx->flags & AWS4C_HTTPS_INSECURE ) {
      curl_easy_setopt( ch, CURLOPT_SSL_VERIFYPEER, 0L );
@@ -2193,6 +2253,10 @@ s3_do_get ( IOBuf* b, char* const signature,
   snprintf ( Buf, sizeof(Buf), "http%s://%s/%s",
              ((ctx->flags & AWS4C_HTTPS) ? "s" : ""), ctx->S3Host, resource );
 
+  curl_easy_setopt ( ch, CURLOPT_HTTPHEADER, slist);
+
+
+  // --- OPTIONS
 
 #if (LIBCURL_VERSION_MAJOR > 7) || ((LIBCURL_VERSION_MAJOR == 7) && (LIBCURL_VERSION_MINOR >= 36))
   //  if (curl_version_info(CURLVERSION_NOW)->version_num >= 0x072400) {
@@ -2201,7 +2265,21 @@ s3_do_get ( IOBuf* b, char* const signature,
   //  }
 #endif
 
-  curl_easy_setopt ( ch, CURLOPT_HTTPHEADER, slist);
+  // maybe use HTTP "digest" authentication
+  if (ctx->flags & AWS4C_HTTP_DIGEST) {
+
+     if (!ctx->awsKeyID || !ctx->awsKey) {
+        fprintf(stderr, "ERROR: PUT/POST in HTTP-digest mode, but user / password empty\n");
+        exit(1);
+     }
+     char user_pass[1024];
+     snprintf(user_pass, sizeof(user_pass), "%s:%s",
+              ctx->awsKeyID, ctx->awsKey);
+
+     curl_easy_setopt ( ch, CURLOPT_USERPWD, user_pass );
+     curl_easy_setopt ( ch, CURLOPT_HTTPAUTH, CURLAUTH_DIGEST );
+  }
+
   if ( ctx->flags & AWS4C_HTTPS_INSECURE ) {
      curl_easy_setopt( ch, CURLOPT_SSL_VERIFYPEER, 0L );
      curl_easy_setopt( ch, CURLOPT_SSL_VERIFYHOST, 0L );
@@ -2280,6 +2358,21 @@ s3_do_delete ( IOBuf *b, char * const signature,
 
   snprintf ( Buf, sizeof(Buf), "http%s://%s/%s",
              ((ctx->flags & AWS4C_HTTPS) ? "s" : ""), ctx->S3Host, resource );
+
+  // maybe use HTTP "digest" authentication
+  if (ctx->flags & AWS4C_HTTP_DIGEST) {
+
+     if (!ctx->awsKeyID || !ctx->awsKey) {
+        fprintf(stderr, "ERROR: PUT/POST in HTTP-digest mode, but user / password empty\n");
+        exit(1);
+     }
+     char user_pass[1024];
+     snprintf(user_pass, sizeof(user_pass), "%s:%s",
+              ctx->awsKeyID, ctx->awsKey);
+
+     curl_easy_setopt ( ch, CURLOPT_USERPWD, user_pass );
+     curl_easy_setopt ( ch, CURLOPT_HTTPAUTH, CURLAUTH_DIGEST );
+  }
 
   curl_easy_setopt ( ch, CURLOPT_CUSTOMREQUEST, "DELETE");
   curl_easy_setopt ( ch, CURLOPT_HTTPHEADER, slist);
