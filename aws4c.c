@@ -45,6 +45,8 @@
 #include <string.h>
 #include <unistd.h>
 #include <sys/stat.h>
+#include <sys/types.h>
+#include <pwd.h>
 #include <curl/curl.h>
 #include <openssl/hmac.h>
 #include <openssl/evp.h>
@@ -369,8 +371,10 @@ static FILE * __aws_getcfg ()
 {
   int rv;
   char ConfigFile[256];
+  struct passwd* pw;
   /// Compose FileName and check
-  snprintf ( ConfigFile, sizeof(ConfigFile) -3, "%s/.awsAuth", getenv("HOME"));
+  pw = getpwuid(geteuid());
+  snprintf ( ConfigFile, sizeof(ConfigFile) -3, "%s/.awsAuth", pw->pw_dir );
   __debug ( "Config File %s", ConfigFile );
 
   struct stat sBuf;
@@ -379,7 +383,7 @@ static FILE * __aws_getcfg ()
 
   
   if ( sBuf.st_mode & 066   ||
-       sBuf.st_uid != getuid () ) {
+       sBuf.st_uid != geteuid () ) {
     fprintf ( stderr, "I refuse to read your credentials from %s as this "
               "file is readable by, writable by or owned by someone else."
               "Try chmod 600 %s", ConfigFile, ConfigFile );
