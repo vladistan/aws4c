@@ -531,16 +531,22 @@ static AWSContext* aws_context_new_internal() {
       fprintf(stderr, "aws_context_new_internal: malloc failed\n");
       return NULL;
    }
+   memset(ctx, 0, sizeof(AWSContext));
    return ctx;
 }
 
+
+// reinstall default values
 void aws_context_reset() { // reset the default context
    aws_context_reset_r(&default_ctx);
 }
-
 // Restore original default settings in a context.
-// TBD: should close <ch>, etc?
 void aws_context_reset_r(AWSContext* ctx) {
+
+   // free any dynamically-allocated storage
+   aws_context_release_r(ctx);
+
+   // assign default values
    *ctx = (AWSContext) {
       .ch = NULL,
       .reuse_connections = 0,
@@ -555,6 +561,9 @@ void aws_context_reset_r(AWSContext* ctx) {
       .awsKey   = NULL,            /// <AWS Key Material
 
       /// \todo Use SQSHost in SQS functions
+      /// \todo NOTE: Unlike all other string-members, we allocate SQSHost statically
+      /// \todo That's because there's no set method for it, and context_clone() doesn't
+      //  \todo strdup() it, and context_release() etc doesn't free it.
       .SQSHost  = "queue.amazonaws.com", /// <AWS SQS host
       .S3Host   = "s3.amazonaws.com",    /// <AWS S3 host
       .S3Proxy  = NULL,
@@ -589,13 +598,65 @@ AWSContext* aws_context_clone_r(AWSContext* ctx) {
    if (!ctx)
       return NULL;
 
-   AWSContext* ctx_new = aws_context_new_internal();
-   *ctx_new = *ctx;
-   return ctx_new;
+   AWSContext* new_ctx = aws_context_new_internal();
+
+   //   // DO NOT DO THIS.  The curl handle needs to be cleaned up (which closes
+   //   // any existing connection).  We could do this explicitly, like
+   //   // aws_reset_connection(), but we're already going to call
+   //   // s3_set_host(NULL,ctx), which will also reset the connection, as long
+   //   // as we haven't nulled it out, here.
+   //
+   //   new_ctx->ch = NULL;
+
+   new_ctx->inside = 0;           // don't want to match original this closely?
+   new_ctx->reset_connection = 0; // don't want to match original this closely?
+
+   aws_reuse_connections_r(ctx->reuse_connections, new_ctx);
+
+   // aws_set_debug_r(ctx->debug, new_ctx);
+   aws_set_rrs_r(ctx->useRrs, new_ctx);
+
+   aws_set_id_r(ctx->ID, new_ctx);
+   aws_set_keyid_r(ctx->awsKeyID, new_ctx);
+   aws_set_key_r(ctx->awsKey, new_ctx);
+
+   // we aren't maintaining this as dynamically allocated
+   new_ctx->SQSHost  = "queue.amazonaws.com"; /// <AWS SQS host
+
+   s3_set_bucket_r(ctx->Bucket, new_ctx);
+   s3_set_host_r(ctx->S3Host, new_ctx);
+   s3_set_proxy_r(ctx->S3Proxy, new_ctx);
+   s3_set_mime_r(ctx->MimeType, new_ctx);
+   s3_set_acl_r(ctx->AccessControl, new_ctx);
+
+   new_ctx->byte_range.offset = 0;
+   new_ctx->byte_range.length = 0;
+   new_ctx->content_length = 0;
+
+   return new_ctx;
 }
 
 
+
+// free old storage
+void aws_context_release() {
+   aws_context_release_r(&default_ctx);
+}
+void aws_context_release_r(AWSContext* ctx) {
+   if (ctx->ID)
+      free(ctx->ID);
+   aws_set_keyid_r(NULL, ctx);
+   aws_set_key_r(NULL, ctx);
+
+   s3_set_bucket_r(NULL, ctx);
+   s3_set_host_r(NULL, ctx);
+   s3_set_proxy_r(NULL, ctx);
+   s3_set_mime_r(NULL, ctx);
+   s3_set_acl_r(NULL, ctx);
+}
+
 void aws_context_free_r(AWSContext* ctx) {
+   aws_context_release_r(ctx);
    free(ctx);
 }
 
@@ -692,7 +753,7 @@ void aws_set_id   ( char * const id ) {
 void aws_set_id_r ( char * const id, AWSContext* ctx ) {
    if (ctx->ID)
       free(ctx->ID);
-   ctx->ID = ((id == NULL) ? getenv("USER") : strdup(id));
+   ctx->ID = ((id == NULL) ? strdup(getenv("USER")) : strdup(id));
 }
 
 // This is the second token in each colon-delimited line in the ~/.awsAuth
@@ -760,8 +821,8 @@ int aws_read_config   ( char * const id ) {
 }
 int aws_read_config_r ( char * const id, AWSContext* ctx ) {
    aws_set_id_r   ( id, ctx );
-   aws_set_keyid_r( NULL, ctx );
    aws_set_key_r  ( NULL, ctx);
+   aws_set_keyid_r( NULL, ctx );
 
   /// Open File
   /// Make sure that file permissions are set right
@@ -846,6 +907,7 @@ void s3_set_host_r ( const char * const str, AWSContext* ctx ) {
       curl_easy_cleanup(ctx->ch);
       ctx->ch = NULL;
    }
+
    if (ctx->S3Host && !(ctx->flags & S3HOST_STATIC))
       free(ctx->S3Host);
    ctx->S3Host = ((str == NULL) ? NULL :  strdup(str));
@@ -871,6 +933,7 @@ void s3_set_proxy_r ( const char * const str, AWSContext* ctx ) {
       curl_easy_cleanup(ctx->ch);
       ctx->ch = NULL;
    }
+
    if (ctx->S3Proxy && !(ctx->flags & S3PROXY_STATIC))
       free(ctx->S3Proxy);
    ctx->S3Proxy = ((str == NULL) ? NULL :  strdup(str));
@@ -1091,7 +1154,7 @@ void iobuf_node_list_free(IOBufNode* n) {
 //     access to state-information including semaphores.  If someone calls
 //     aws_iobuf_reset() in such a way that user_data is NULL at exactly
 //     the moment that the readfunc/writefunc dereferences it, then the
-//     func will segfault.  [Q: Yeah, but what are the changes of that ever
+//     func will segfault.  [Q: Yeah, but what are the chances of that ever
 //     happening? A: 100%.  I'm looking at it right now, in the debugger.]
 //
 //     THEREFORE: we can not temporarily wipe everything and then restore
@@ -1126,7 +1189,7 @@ void aws_iobuf_reset(IOBuf* bf) {
 //     parsed the response headers.  The GET only wants to reset the
 //     buffers; not the parsed headers (e.g. in IOBuf.result, lastMod,
 //     eTag, etc).  These fields will be needed later, to assess the
-//     response fromt he server.  So we break out aws_iobuf_reset_lite()
+//     response from the server.  So we break out aws_iobuf_reset_lite()
 //     to do just that.
 
 void aws_iobuf_reset_lite(IOBuf* bf) {

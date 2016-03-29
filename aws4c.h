@@ -170,10 +170,12 @@ typedef struct AWSContext {
 
 AWSContext* aws_context_new();
 AWSContext* aws_context_clone(); // copy the default context
+void        aws_context_release(); // release internal storage
 void        aws_context_reset(); // restore default settings
 
 AWSContext* aws_context_clone_r(AWSContext* ctx);
 void        aws_context_reset_r(AWSContext* ctx);
+void        aws_context_release_r(AWSContext* ctx);
 void        aws_context_free_r (AWSContext* ctx);
 
 // void aws_reset_context();       // reset dflt ctx used by non-thread-safe fns
