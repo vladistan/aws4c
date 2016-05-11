@@ -1249,7 +1249,9 @@ void aws_iobuf_reset_lite(IOBuf* bf) {
 void aws_iobuf_reset_hard(IOBuf* b) {
    aws_iobuf_reset(b);
 
-   aws_context_free_r(b->context);
+   if (b->context)
+      aws_context_free_r(b->context);
+
    memset(b, 0, sizeof(IOBuf));
 }
 
