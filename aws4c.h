@@ -125,6 +125,11 @@ void s3_sproxyd                   ( int value );
 void s3_http_digest               ( int value );
 
 
+// #define DEFAULT_SQS_HOST   "queue.amazonaws.com"
+#define DEFAULT_SQS_HOST   "default.sqs.host"  /* reveal anything that tries to use this */
+
+// #define DEFAULT_S3_HOST    "s3.amazonaws.com"
+#define DEFAULT_S3_HOST    "default.s3.host"   /* reveal anything that tries to use this */
 
 // ---------------------------------------------------------------------------
 // global vars  (thread-safe)
@@ -332,6 +337,15 @@ extern size_t aws_headerfunc( void* ptr, size_t size, size_t nitems, void* strea
 extern size_t aws_readfunc  ( void* ptr, size_t size, size_t nmemb,  void* stream );
 extern size_t aws_writefunc ( void* ptr, size_t size, size_t nmemb,  void* stream );
 
+
+char*  GetStringToSign ( char *       resource,
+                         int          resSize, 
+                         char **      date,
+                         char * const method,
+                         MetaNode*    metadata,
+                         // char * const bucket,
+                         char * const file,
+                         AWSContext*  const ctx);
 
 // ---------------------------------------------------------------------------
 // GET / PUT requests  (etc)

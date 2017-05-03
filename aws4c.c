@@ -404,14 +404,14 @@ static FILE * __aws_getcfg ()
 /// \param file --  file
 /// \return fills up resource and date parameters, also 
 ///         returns request signature to be used with Authorization header
-static char * GetStringToSign ( char *       resource,
-                                int          resSize, 
-                                char **      date,
-                                char * const method,
-                                MetaNode*    metadata,
-                                // char * const bucket,
-                                char * const file,
-                                AWSContext*  ctx)
+char* GetStringToSign ( char *       resource,
+                        int          resSize, 
+                        char **      date,
+                        char * const method,
+                        MetaNode*    metadata,
+                        // char * const bucket,
+                        char * const file,
+                        AWSContext*  ctx)
 {
   char  reqToSign[2048];
   char  acl[32];
@@ -564,8 +564,8 @@ void aws_context_reset_r(AWSContext* ctx) {
       /// \todo NOTE: Unlike all other string-members, we allocate SQSHost statically
       /// \todo That's because there's no set method for it, and context_clone() doesn't
       //  \todo strdup() it, and context_release() etc doesn't free it.
-      .SQSHost  = "queue.amazonaws.com", /// <AWS SQS host
-      .S3Host   = "s3.amazonaws.com",    /// <AWS S3 host
+      .SQSHost  = DEFAULT_SQS_HOST, /// <AWS SQS host
+      .S3Host   = DEFAULT_S3_HOST,  /// <AWS S3 host
       .S3Proxy  = NULL,
       .Bucket   = NULL,
       .MimeType = NULL,
@@ -621,7 +621,7 @@ AWSContext* aws_context_clone_r(AWSContext* ctx) {
    aws_set_key_r(ctx->awsKey, new_ctx);
 
    // we aren't maintaining this as dynamically allocated
-   new_ctx->SQSHost  = "queue.amazonaws.com"; /// <AWS SQS host
+   new_ctx->SQSHost  = DEFAULT_SQS_HOST; /// <AWS SQS host
 
    s3_set_bucket_r(ctx->Bucket, new_ctx);
    s3_set_host_r(ctx->S3Host, new_ctx);
@@ -830,7 +830,7 @@ int aws_read_config_r ( char * const id, AWSContext* ctx ) {
   FILE * f = __aws_getcfg();
   if ( f == NULL ) {
      perror ("Error opening config file");
-     exit(1);
+     return -1;
   }
   
 
@@ -853,7 +853,7 @@ int aws_read_config_r ( char * const id, AWSContext* ctx ) {
     char * keyID = strchr(line,':');
     if ( keyID == NULL ) {
       printf ( "Syntax error in credentials file line %d, no keyid\n", ln );
-      exit(1);
+      return -1;
     }
     *keyID = 0;
     keyID ++;
@@ -861,7 +861,7 @@ int aws_read_config_r ( char * const id, AWSContext* ctx ) {
     char * key = strchr(keyID,':');
     if ( key == NULL ) {
       printf ( "Syntax error in credentials file line %d, no key\n", ln );
-      exit(1);
+      return -1;
     }
     *key = 0;
     key ++;

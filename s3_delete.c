@@ -31,12 +31,11 @@ int main ( int argc, char * argv[] )
   aws_init ();
   aws_set_debug ( 1 );
   int rc = aws_read_config  ( "sample" );
-  if ( rc )
-    {
-      puts ( "Could not find a credential in the config file" );
-      puts ( "Make sure your ~/.awsAuth file is correct" );
-      exit ( 1 );
-    }
+  if ( rc ) {
+     puts ( "Could not find a credential in the config file" );
+     puts ( "Make sure your ~/.awsAuth file is correct" );
+     exit ( 1 );
+  }
 
   s3_set_host ( "s3.amazonaws.com");
   s3_set_bucket ("aws4c.samples");
