@@ -338,9 +338,17 @@ extern size_t aws_readfunc  ( void* ptr, size_t size, size_t nmemb,  void* strea
 extern size_t aws_writefunc ( void* ptr, size_t size, size_t nmemb,  void* stream );
 
 
+#define DateConvStringSize  256
+
+typedef struct {
+   char        chars[DateConvStringSize];
+   time_t*     time;            /* NULL means use current time */
+} DateConv;
+
+
 char*  GetStringToSign ( char *       resource,
                          int          resSize, 
-                         char **      date,
+                         DateConv*    dateConv,
                          char * const method,
                          MetaNode*    metadata,
                          // char * const bucket,

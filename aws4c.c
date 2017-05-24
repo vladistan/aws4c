@@ -61,6 +61,7 @@
   \{
 */
 
+// Masks for various AWSContext.flags
 // S3Host and S3Proxy are initially static constants, but will be replaced
 // with dynamically-allocated strings.  The "_STATIC" flags let us know
 // whether to free, or not.
@@ -99,17 +100,16 @@ static int debug = 0;           /// <flag to control debugging options
 
 
 // If you call aws_reuse_connections() with non-zero value, then we'll try
-// to reuse connection, instead of calling curl_easy_init() /
+// to reuse connections, instead of calling curl_easy_init() /
 // curl_easy_cleanup() in every function.  aws_reset_connection() causes a
 // one-time reset.  (This is useful to eliminate client-side caching which
 // may affect measure read bandwidth.)
 static void   aws_curl_enter();
 static void   aws_curl_exit();
 
-
 static void   __debug ( char *fmt, ... ) ;
-static char * __aws_get_iso_date ();
-static char * __aws_get_httpdate ();
+static char * __aws_get_iso_date (char* date, size_t size, time_t* time);
+static char * __aws_get_httpdate (char* date, size_t size, time_t* time);
 static FILE * __aws_getcfg ();
 
 static CURLcode s3_do_get ( IOBuf* b, char* const signature, 
@@ -302,18 +302,36 @@ size_t aws_headerfunc ( void * ptr, size_t size, size_t nmemb, void * stream )
 }
 
 
-/// Get Data for authentication of SQS request
+/// Get date for authentication of SQS request
+/// Format request-date into provided buffer.  Caller can provide
+/// the timestamp.  Thread-safe.
+/// 
+/// \internal
+/// \param dTa     buffer to receive formatted time
+/// \param size    size of dTa
+/// \param time    if non-null, use this time, instead of "now".
+//
 /// \return date in ISO format
-static char * __aws_get_iso_date ()
+static char * __aws_get_iso_date (char* dTa, size_t size, time_t* t_ptr)
 {
-  static char dTa[256];
-  time_t t = time(NULL);
-  struct tm * gTime = gmtime ( & t );
+   // use GMT time
+   struct tm*  gTime;
+   struct tm   result;
+   if (t_ptr)
+      gTime = gmtime_r(t_ptr, &result);
+   else {
+      time_t t = time(NULL);
+      gTime = gmtime_r(&t, &result);
+   }
 
-  memset ( dTa, 0 , sizeof(dTa));
-  strftime ( dTa, sizeof(dTa), "%FT%H:%M:%SZ", gTime );
-  __debug ( "Request Time: %s", dTa );
-  return dTa;
+   if (! gTime)
+      return NULL;              /* error in gmtime_r() */
+
+   memset ( dTa, 0 , sizeof(dTa));
+   strftime ( dTa, sizeof(dTa), "%FT%H:%M:%SZ", gTime );
+   __debug ( "Request Time: %s", dTa );
+
+   return  dTa;
 }
 
 #ifdef ENABLE_DUMP
@@ -352,18 +370,35 @@ static void __debug ( char *fmt, ... ) {
 }
 
 
-/// Get Request Date
+/// Format request-date into provided buffer.  Caller can provide
+/// the timestamp.  Thread-safe.
+/// 
 /// \internal
-/// \return date in HTTP format
-static char * __aws_get_httpdate ()
+/// \param dTa     buffer to receive formatted time
+/// \param size    size of dTa
+/// \param time    if non-null, use this time, instead of "now".
+//
+/// \Return date in HTTP format
+static char * __aws_get_httpdate (char* dTa, size_t size, time_t* t_ptr)
 {
-  static char dTa[256];
-  time_t t = time(NULL);
-  struct tm * gTime = gmtime ( & t );
-  memset ( dTa, 0 , sizeof(dTa));
-  strftime ( dTa, sizeof(dTa), "%a, %d %b %Y %H:%M:%S +0000", gTime );
-  __debug ( "Request Time: %s", dTa );
-  return dTa;
+   // use GMT time
+   struct tm*  gTime;
+   struct tm   result;
+   if (t_ptr)
+      gTime = gmtime_r(t_ptr, &result);
+   else {
+      time_t t = time(NULL);
+      gTime = gmtime_r(&t, &result);
+   }
+
+   if (! gTime)
+      return NULL;              /* error in gmtime_r() */
+
+   memset ( dTa, 0 , size);
+   strftime ( dTa, size, "%a, %d %b %Y %H:%M:%S +0000", gTime );
+   __debug ( "Request Time: %s", *dTa );
+
+   return dTa;
 }
 
 /// Internal function to get configuration file
@@ -398,15 +433,16 @@ static FILE * __aws_getcfg ()
 /// \internal
 /// \param resource -- URI of the object
 /// \param resSize --  size of the resource buffer
-/// \param date -- HTTP date
+/// \param date -- struct containind HTTP date-buffer, and optional time_t*
 /// \param method -- HTTP method
 /// \param bucket -- bucket 
 /// \param file --  file
 /// \return fills up resource and date parameters, also 
 ///         returns request signature to be used with Authorization header
+/// \todo Change the way RRS is handled.  Need to pass it in
 char* GetStringToSign ( char *       resource,
                         int          resSize, 
-                        char **      date,
+                        DateConv*    dateConv,
                         char * const method,
                         MetaNode*    metadata,
                         // char * const bucket,
@@ -421,10 +457,7 @@ char* GetStringToSign ( char *       resource,
   char         meta[MAX_META];
   MetaNode*    pair;
   
-
-  /// \todo Change the way RRS is handled.  Need to pass it in
-  
-  * date = __aws_get_httpdate();
+  __aws_get_httpdate((char*)dateConv->chars, DateConvStringSize, dateConv->time);
 
   memset ( resource, 0, resSize);
   if ( ctx->Bucket )
@@ -466,7 +499,7 @@ char* GetStringToSign ( char *       resource,
   snprintf ( reqToSign, sizeof(reqToSign), "%s\n\n%s\n%s\n%s%s%s/%s",
              method,
              ctx->MimeType ? ctx->MimeType : "",
-             *date,
+             (char*)dateConv->chars,
              acl,
              meta,
              rrs,
@@ -827,7 +860,7 @@ int aws_read_config_r ( char * const id, AWSContext* ctx ) {
   /// Open File
   /// Make sure that file permissions are set right
   __debug ( "Reading Config File ID[%s]", ctx->ID );
-  FILE * f = __aws_getcfg();
+  FILE* f = __aws_getcfg();
   if ( f == NULL ) {
      perror ("Error opening config file");
      return -1;
@@ -853,6 +886,7 @@ int aws_read_config_r ( char * const id, AWSContext* ctx ) {
     char * keyID = strchr(line,':');
     if ( keyID == NULL ) {
       printf ( "Syntax error in credentials file line %d, no keyid\n", ln );
+      fclose(f);
       return -1;
     }
     *keyID = 0;
@@ -861,6 +895,7 @@ int aws_read_config_r ( char * const id, AWSContext* ctx ) {
     char * key = strchr(keyID,':');
     if ( key == NULL ) {
       printf ( "Syntax error in credentials file line %d, no key\n", ln );
+      fclose(f);
       return -1;
     }
     *key = 0;
@@ -874,6 +909,11 @@ int aws_read_config_r ( char * const id, AWSContext* ctx ) {
       break;
     }
   }
+
+  // always close the credentials file
+  fclose(f);
+
+
   /// Return error if not found
   if ( ctx->awsKeyID == NULL ) {
      __debug("Didn't find user %s in config-file\n", id);
@@ -1891,15 +1931,16 @@ CURLcode s3_put ( IOBuf* b, char * const obj_name )
    AWSContext* ctx = (b->context ? b->context : &default_ctx);
 
   char * const method = "PUT";
-  char  resource [1024];
-  char * date = NULL;
+  char         resource [1024];
+  DateConv     date_conv = { .time = NULL };
 
   char * signature = GetStringToSign ( resource, sizeof(resource), 
-                                       &date, method, b->meta, obj_name, ctx );
-  CURLcode sc = s3_do_put_or_post( b, signature, date, resource, 0, NULL, NULL ); 
+                                       &date_conv, method, b->meta, obj_name, ctx );
+  CURLcode sc = s3_do_put_or_post( b, signature, date_conv.chars, resource, 0, NULL, NULL ); 
   free ( signature );
   return sc;
 }
+
 /// Like S3_put(), but with a little more control.
 /// \param file       local file to be uploaded. (If NULL, then we assume data is in <b>.)
 /// \param response   if non-null, gets the XML response from the server.
@@ -1908,12 +1949,12 @@ CURLcode s3_put2 ( IOBuf* b, char * const obj_name, char* const src_file, IOBuf*
    AWSContext* ctx = (b->context ? b->context : &default_ctx);
 
   char * const method = "PUT";
-  char  resource [1024];
-  char * date = NULL;
+  char         resource [1024];
+  DateConv     date_conv = { .time = NULL };
 
   char * signature = GetStringToSign ( resource, sizeof(resource), 
-                                       &date, method, b->meta, obj_name, ctx ); 
-  CURLcode sc = s3_do_put_or_post( b, signature, date, resource, 0, src_file, response ); 
+                                       &date_conv, method, b->meta, obj_name, ctx ); 
+  CURLcode sc = s3_do_put_or_post( b, signature, date_conv.chars, resource, 0, src_file, response ); 
   free ( signature );
   return sc;
 }
@@ -1940,27 +1981,28 @@ CURLcode s3_post ( IOBuf* b, char* const obj_name )
    AWSContext* ctx = (b->context ? b->context : &default_ctx);
 
   char * const method = "POST";
-  char  resource [1024];
-  char * date = NULL;
+  char         resource [1024];
+  DateConv     date_conv = { .time = NULL };
 
   char * signature = GetStringToSign ( resource, sizeof(resource), 
-                                       &date, method, b->meta, obj_name, ctx ); 
-  CURLcode sc = s3_do_put_or_post( b, signature, date, resource, 1, NULL, NULL ); 
+                                       &date_conv, method, b->meta, obj_name, ctx ); 
+  CURLcode sc = s3_do_put_or_post( b, signature, date_conv.chars, resource, 1, NULL, NULL ); 
   free ( signature );
   return sc;
 }
+
 /// like s3_put2()(), but with POST
 CURLcode s3_post2 ( IOBuf* b, char* const obj_name, char* const src_file, IOBuf* response )
 {
    AWSContext* ctx = (b->context ? b->context : &default_ctx);
 
   char * const method = "POST";
-  char  resource [1024];
-  char * date = NULL;
+  char         resource [1024];
+  DateConv     date_conv = { .time = NULL };
 
   char * signature = GetStringToSign ( resource, sizeof(resource), 
-                                       &date, method, b->meta, obj_name, ctx ); 
-  CURLcode sc = s3_do_put_or_post( b, signature, date, resource, 1, src_file, response ); 
+                                       &date_conv, method, b->meta, obj_name, ctx ); 
+  CURLcode sc = s3_do_put_or_post( b, signature, date_conv.chars, resource, 1, src_file, response ); 
   free ( signature );
   return sc;
 }
@@ -1974,26 +2016,27 @@ CURLcode s3_get ( IOBuf * b, char * const obj_name )
    AWSContext* ctx = (b->context ? b->context : &default_ctx);
 
   char * const method = "GET";
-  char  resource [1024];
-  char * date = NULL;
+  char         resource [1024];
+  DateConv     date_conv = { .time = NULL };
 
   char * signature = GetStringToSign ( resource, sizeof(resource), 
-                                       &date, method, b->meta, obj_name, ctx ); 
-  CURLcode sc = s3_do_get( b, signature, date, resource, 0, NULL, NULL ); 
+                                       &date_conv, method, b->meta, obj_name, ctx ); 
+  CURLcode sc = s3_do_get( b, signature, date_conv.chars, resource, 0, NULL, NULL ); 
   free ( signature );
   return sc;
 }
+
 CURLcode s3_get2 ( IOBuf * b, char * const obj_name, char* const src_file, IOBuf* response )
 {
    AWSContext* ctx = (b->context ? b->context : &default_ctx);
 
   char * const method = "GET";
-  char  resource [1024];
-  char * date = NULL;
+  char         resource [1024];
+  DateConv     date_conv = { .time = NULL };
 
   char * signature = GetStringToSign ( resource, sizeof(resource), 
-                                       &date, method, b->meta, obj_name, ctx ); 
-  CURLcode sc = s3_do_get( b, signature, date, resource, 0, src_file, response ); 
+                                       &date_conv, method, b->meta, obj_name, ctx ); 
+  CURLcode sc = s3_do_get( b, signature, date_conv.chars, resource, 0, src_file, response ); 
   free ( signature );
   return sc;
 }
@@ -2005,26 +2048,27 @@ CURLcode s3_head ( IOBuf * b, char * const obj_name )
    AWSContext* ctx = (b->context ? b->context : &default_ctx);
 
   char * const method = "HEAD";
-  char  resource [1024];
-  char * date = NULL;
+  char         resource [1024];
+  DateConv     date_conv = { .time = NULL };
 
   char * signature = GetStringToSign ( resource, sizeof(resource), 
-                                       &date, method, b->meta, obj_name, ctx ); 
-  CURLcode sc = s3_do_get( b, signature, date, resource, 1, NULL, NULL ); 
+                                       &date_conv, method, b->meta, obj_name, ctx ); 
+  CURLcode sc = s3_do_get( b, signature, date_conv.chars, resource, 1, NULL, NULL ); 
   free ( signature );
   return sc;
 }
+
 CURLcode s3_head2 ( IOBuf * b, char * const obj_name, char* const fname, IOBuf* response )
 {
    AWSContext* ctx = (b->context ? b->context : &default_ctx);
 
   char * const method = "HEAD";
-  char  resource [1024];
-  char * date = NULL;
+  char         resource [1024];
+  DateConv     date_conv = { .time = NULL };
 
   char * signature = GetStringToSign ( resource, sizeof(resource), 
-                                       &date, method, b->meta, obj_name, ctx ); 
-  CURLcode sc = s3_do_get( b, signature, date, resource, 1, fname, response ); 
+                                       &date_conv, method, b->meta, obj_name, ctx ); 
+  CURLcode sc = s3_do_get( b, signature, date_conv.chars, resource, 1, fname, response ); 
   free ( signature );
   return sc;
 }
@@ -2038,12 +2082,12 @@ CURLcode s3_delete ( IOBuf * b, char * const obj_name )
    AWSContext* ctx = (b->context ? b->context : &default_ctx);
 
   char * const method = "DELETE";
-  
-  char  resource [1024];
-  char * date = NULL;
+  char         resource [1024];
+  DateConv     date_conv = { .time = NULL };
+
   char * signature = GetStringToSign ( resource, sizeof(resource), 
-                                       &date, method, b->meta, obj_name, ctx ); 
-  CURLcode sc = s3_do_delete( b, signature, date, resource ); 
+                                       &date_conv, method, b->meta, obj_name, ctx ); 
+  CURLcode sc = s3_do_delete( b, signature, date_conv.chars, resource ); 
   free ( signature );
 
   return sc;
@@ -2531,7 +2575,9 @@ int sqs_create_queue ( IOBuf *b, char * const name )
                 "SignatureVersion1"
                 "Timestamp%sVersion2009-02-01";
 
-  date = __aws_get_iso_date();
+  DateConv     date_conv = { .time = NULL };
+  date = __aws_get_iso_date((char*)date_conv.chars, DateConvStringSize, date_conv.time);
+
   snprintf ( customSign, sizeof(customSign), Sign,
              ctx->awsKeyID, name, date );
   signature =  SQSSign ( customSign, ctx );
@@ -2575,7 +2621,9 @@ int sqs_list_queues ( IOBuf *b, char * const prefix )
                 "SignatureVersion1"
                 "Timestamp%sVersion2009-02-01";
 
-  date = __aws_get_iso_date  ();
+  DateConv     date_conv = { .time = NULL };
+  date = __aws_get_iso_date((char*)date_conv.chars, DateConvStringSize, date_conv.time);
+
   snprintf ( customSign, sizeof(customSign), Sign,
              ctx->awsKeyID, prefix, date );
   signature =  SQSSign ( customSign, ctx );
@@ -2656,7 +2704,9 @@ int sqs_get_queueattributes ( IOBuf *b, char * url, int *timeOut, int *nMesg )
     "Timestamp%s"
     "Version2009-02-01";
 
-  date = __aws_get_iso_date  ();
+  DateConv     date_conv = { .time = NULL };
+  date = __aws_get_iso_date((char*)date_conv.chars, DateConvStringSize, date_conv.time);
+
   snprintf ( customSign, sizeof(customSign),
              Sign, ctx->awsKeyID, date );
 
@@ -2719,7 +2769,9 @@ int sqs_set_queuevisibilitytimeout ( IOBuf *b, char * url, int sec )
     "Timestamp%s"
     "Version2009-02-01";
 
-  date = __aws_get_iso_date  ();
+  DateConv     date_conv = { .time = NULL };
+  date = __aws_get_iso_date((char*)date_conv.chars, DateConvStringSize, date_conv.time);
+
   snprintf ( customSign, sizeof(customSign),
              Sign, sec, ctx->awsKeyID, date );
 
@@ -2767,7 +2819,9 @@ int sqs_send_message ( IOBuf *b, char * const url, char * const msg )
     "Timestamp%s"
     "Version2009-02-01";
 
-  date = __aws_get_iso_date  ();
+  DateConv     date_conv = { .time = NULL };
+  date = __aws_get_iso_date((char*)date_conv.chars, DateConvStringSize, date_conv.time);
+
   snprintf ( customSign, sizeof(customSign),
              Sign, ctx->awsKeyID, msg, date );
 
@@ -2813,7 +2867,9 @@ int sqs_get_message ( IOBuf * b, char * const url, char * id  )
     "Timestamp%s"
     "Version2009-02-01";
 
-  date = __aws_get_iso_date  ();
+  DateConv     date_conv = { .time = NULL };
+  date = __aws_get_iso_date((char*)date_conv.chars, DateConvStringSize, date_conv.time);
+
   snprintf ( customSign, sizeof(customSign), Sign,
              ctx->awsKeyID, date );
 
@@ -2907,7 +2963,9 @@ int sqs_delete_message ( IOBuf * b, char * const url, char * receipt )
     "Timestamp%s"
     "Version2009-02-01";
 
-  date = __aws_get_iso_date  ();
+  DateConv     date_conv = { .time = NULL };
+  date = __aws_get_iso_date((char*)date_conv.chars, DateConvStringSize, date_conv.time);
+
   snprintf ( customSign, sizeof(customSign), Sign,
              ctx->awsKeyID, receipt, date );
 
