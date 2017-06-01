@@ -396,7 +396,7 @@ static char * __aws_get_httpdate (char* dTa, size_t size, time_t* t_ptr)
 
    memset ( dTa, 0 , size);
    strftime ( dTa, size, "%a, %d %b %Y %H:%M:%S +0000", gTime );
-   __debug ( "Request Time: %s", *dTa );
+   __debug ( "Request Time: %s", dTa );
 
    return dTa;
 }
