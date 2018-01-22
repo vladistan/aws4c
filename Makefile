@@ -14,7 +14,7 @@ XML_INC_DIR = /usr/include/libxml2
 ifdef DEBUG
 	CFLAGS = -g
 else
-	CFLAGS = -O3
+	CFLAGS = -g -O3
 endif
 CFLAGS += -Wall -I $(XML_INC_DIR) -L .
 
