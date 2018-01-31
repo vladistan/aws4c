@@ -102,9 +102,9 @@ debug_iobuf_node(IOBufNode* n, int show_node_contents) {
 
 void
 debug_iobuf_node_list(IOBufNode* n, int show_contents) {
-   IOBufNode* ptr;
-   for (ptr=n; n; n=n->next) {
+   while (n) {
       debug_iobuf_node(n, show_contents);
+      n = n->next;
    }
 }
 

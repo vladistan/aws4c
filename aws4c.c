@@ -327,8 +327,8 @@ static char * __aws_get_iso_date (char* dTa, size_t size, time_t* t_ptr)
    if (! gTime)
       return NULL;              /* error in gmtime_r() */
 
-   memset ( dTa, 0 , sizeof(dTa));
-   strftime ( dTa, sizeof(dTa), "%FT%H:%M:%SZ", gTime );
+   memset ( dTa, 0 , size);
+   strftime ( dTa, size, "%FT%H:%M:%SZ", gTime );
    __debug ( "Request Time: %s", dTa );
 
    return  dTa;
