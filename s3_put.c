@@ -14,73 +14,172 @@
  * KIND, either express or implied.
  */
 
+
+// -----------------------------------
+// METHOD should be set to one of these
+// -----------------------------------
+#define PUT_DATA  0
+#define PUT_RRS   1
+#define PUT_FILE  2
+#define POST      3             /* init for multi-part-upload */
+
+#define METHOD    PUT_DATA
+
+
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include "aws4c.h"
 
 
+// This also works for Scality sproxyd, in our conifiguration.
+char* const obj_name = "jti/test";
+
 int putObject ( char * name, IOBuf * bf )
 {
   int i;
-  for ( i = 0 ; i < 9000 ; i ++ )
-    {
-      char S[128];
-      snprintf ( S,sizeof(S), "Ln %d \n" , i );
-      aws_iobuf_append ( bf,S, strlen(S));
-    }
+  for ( i = 0 ; i < 9000 ; i ++ ) {
+    char S[128];
+    snprintf ( S, sizeof(S), "Ln %d \n" , i );
+    aws_iobuf_append ( bf,S, strlen(S));
+  }
   return s3_put ( bf, name );
 }
 
 int main ( int argc, char * argv[] )
 {
-  int rv;
+  char* const user = getenv("USER");
+  char* bucket  = user;
+  if (argc < 2) {
+     fprintf(stderr, "Usage: %s <ip_addr> [ <bucket> ]\n"
+             "\n"
+             "  Bucket defaults to '%s'\n"
+             "  (NOTE: <ip_addr> may include port, e.g. xx.xx.xx.xx:9020)\n",
+             argv[0], user);
+     exit(1);
+  }
+  if (argc > 2) {
+     bucket = argv[2];
+  }
+  char* const ip_addr = argv[1];
+  int         rv;
 
-  aws_init ();
-  aws_set_debug  ( 0 );
-  int rc = aws_read_config  ( "sample" );
-  if ( rc )
-    {
-      puts ( "Could not find a credential in the config file" );
-      puts ( "Make sure your ~/.awsAuth file is correct" );
-      exit ( 1 );
-    }
 
-  s3_set_bucket ("aws4c.samples");
-  s3_set_mime ("text/plain");
-  s3_set_acl ("public-read");
+  aws_init();
+  aws_set_debug(1);
 
-  IOBuf * bf = aws_iobuf_new ();
+  int         rc = aws_read_config(user);
+  if (rc) {
+    printf("Could not find a credential for '%s' in the config file\n", user);
+    printf("Make sure your ~/.awsAuth file is correct\n" );
+    exit (1);
+  }
 
-  rv = putObject ( "aws4c.samplefile", bf );
+  s3_set_host ( ip_addr );
+  s3_set_bucket (bucket);
+
+  // s3_set_mime ("text/plain");
+  // s3_set_mime ("application/octet-stream");
+  // s3_set_acl ("public-read");
+
+  IOBuf * bf       = aws_iobuf_new ();
+
+
+#if METHOD == POST
+
+  // Send a POST request.  The "?uploads" initiates a multi-part upload.
+  // The response should be XML that contains an "UploadId", which would be
+  // used in subsequent PUTs, when uploading the parts.  We capture this
+  // response and print it out.  However, it could also be parsed with an
+  // XML parser, such as libxml2.
+  IOBuf * response = aws_iobuf_new ();
+
+  char dest[1024];
+  sprintf(dest, "%?uploads", obj_name);
+  rv = s3_post ( bf, dest);
+
+#elif (METHOD == PUT_DATA)
+
+  // putObject appends raw-data onto <bf>, the same IOBuf holding header
+  // info.  This data will all be sent as part of the request.
+  rv = putObject ( obj_name, bf );
+
+#elif (METHOD == PUT_FILE)
+
+  // PUT contents of file "upload_me" to the object named "test", under a
+  // bucket with same name as the name of the user.  headers go to <bf>
+  rv =  s3_put2 (bf, obj_name, "upload_me", NULL );
+
+#else
+
+  printf("METHOD must be #define'd to be PUT_DATA, PUT_FILE, or POST");
+  exit(1);
+
+#endif
+
+
   printf ( "RV %d\n", rv );
 
+  // show headers received from server
   printf ( "CODE    [%d] \n", bf->code );
   printf ( "RESULT  [%s] \n", bf->result );
-  printf ( "LEN     [%d] \n", bf->len );
+  printf ( "LEN     [%ld] \n", bf->len );
   printf ( "LASTMOD [%s] \n", bf->lastMod );
   printf ( "ETAG    [%s] \n", bf->eTag );
 
-  while(-1)
-    {
-  char Ln[1024];
-  int sz = aws_iobuf_getline ( bf, Ln, sizeof(Ln));
-  if ( Ln[0] == 0 ) break;
-    printf ( "S[%3d] %s", sz, Ln );
+  //  while (1) {
+  //    char Ln[128]; // Ln[1024];
+  //    int sz = aws_iobuf_getline ( bf, Ln, sizeof(Ln));
+  //    printf ( "S[%3d] ", sz );
+  //    if ( Ln[0] == 0 ) {
+  //      printf("\n");
+  //      break;
+  //    }
+  //    printf ( "%s", Ln );
+  //  }
+
+#if (METHOD == POST)
+  // show headers in the <response>
+  printf ( "response->CODE    [%d] \n", response->code );
+  printf ( "response->RESULT  [%s] \n", response->result );
+  printf ( "response->LEN     [%ld] \n", response->len );
+  printf ( "response->LASTMOD [%s] \n", response->lastMod );
+  printf ( "response->ETAG    [%s] \n", response->eTag );
+
+  // show the XML in the response
+  while (1) {
+    char Ln[128]; // Ln[1024];
+    int sz = aws_iobuf_getline ( response, Ln, sizeof(Ln));
+    printf ( "response[%3d] ", sz );
+    if ( !sz ) {
+      printf("\n");
+      break;
     }
+    printf ( "%s", Ln );
+    if (sz == 128)
+      printf("\n");
+  }
+
+#endif
+
+  // DEBUGGING
+  exit(0);
 
   /// Now Repeat using the RRS
-  bf = aws_iobuf_new ();
+  aws_iobuf_reset ( bf );
   aws_set_rrs ( 1 ) ;
-  rv = putObject ( "aws4c.samplefile.rrs", bf );
+
+  char dest[1024];
+  sprintf(dest, "%s.rrs", obj_name);
+  rv = putObject ( dest, bf );
+
   printf ( "RV %d\n", rv );
-  printf ( "CODE    [%d] \n", bf->code );
-  printf ( "RESULT  [%s] \n", bf->result );
-  printf ( "LEN     [%d] \n", bf->len );
-  printf ( "LASTMOD [%s] \n", bf->lastMod );
-  printf ( "ETAG    [%s] \n", bf->eTag );
-
-
+  printf ( "CODE    [%d] \n",  bf->code );
+  printf ( "RESULT  [%s] \n",  bf->result );
+  printf ( "LEN     [%ld] \n", bf->len );
+  printf ( "LASTMOD [%s] \n",  bf->lastMod );
+  printf ( "ETAG    [%s] \n",  bf->eTag );
 
   return 0;
 }
